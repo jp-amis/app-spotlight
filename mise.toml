@@ -1,0 +1,39 @@
+[tools]
+node = "22"
+pnpm = "10"
+
+[tasks.dev]
+description = "Run the app in dev mode"
+run = "pnpm tauri dev"
+
+[tasks.build]
+description = "Universal release build (applies .env.mas identifier/profile if present)"
+run = "./scripts/build.sh"
+
+[tasks.sandbox]
+description = "Build + codesign (ad-hoc or $APPLE_DEV_IDENTITY) + run locally, sandboxed"
+run = "./scripts/sandbox-run.sh"
+
+[tasks.release]
+description = "Full MAS pipeline: build -> sign -> pkg (requires .env.mas)"
+run = ["./scripts/build.sh", "./scripts/sign.sh", "./scripts/pkg.sh"]
+
+[tasks.icon]
+description = "Generate .icns + png set from a 1024 png: mise run icon -- path/to/icon-1024.png"
+run = "./scripts/build-icon.sh"
+
+[tasks.sign]
+description = "Codesign the built .app for MAS (needs APPLE_DIST_IDENTITY env)"
+run = "./scripts/sign.sh"
+
+[tasks.pkg]
+description = "productbuild a signed .pkg for the Mac App Store (needs APPLE_INSTALLER_IDENTITY env)"
+run = "./scripts/pkg.sh"
+
+[tasks.fmt]
+description = "Format Rust + frontend"
+run = ["cargo fmt --manifest-path src-tauri/Cargo.toml", "pnpm prettier -w src"]
+
+[tasks.test]
+description = "Run Rust + frontend unit tests"
+run = ["cargo test --manifest-path src-tauri/Cargo.toml", "pnpm test"]

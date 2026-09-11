@@ -1,0 +1,18 @@
+# deps
+node_modules
+# build output
+dist
+# rust
+src-tauri/target
+# macos
+.DS_Store
+# env / secrets
+.env
+.env.local
+.env.mas
+# generated MAS build files
+src-tauri/tauri.mas.conf.json
+src-tauri/entitlements.generated.plist
+# signing artifacts
+*.pkg
+*.provisionprofile

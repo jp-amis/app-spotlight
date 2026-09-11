@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@theme {
+  --color-accent: oklch(0.62 0.21 275);
+  --font-sans:
+    ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
+    sans-serif;
+}
+
+/* Transparent window so the native NSVisualEffect vibrancy shows through. */
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+/* Settings window: opaque background (overrides the transparent launcher default)
+   so live-resize never exposes the white window backing. */
+body.settings-window,
+body.settings-window #root {
+  background: #fafafa; /* neutral-50 */
+}
+@media (prefers-color-scheme: dark) {
+  body.settings-window,
+  body.settings-window #root {
+    background: #171717; /* neutral-900 */
+  }
+}
+
+/* Visible keyboard focus in the settings window (all interactive controls). */
+.settings-window :focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Reduce motion when the OS asks for it. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
