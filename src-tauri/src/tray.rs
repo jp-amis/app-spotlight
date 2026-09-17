@@ -6,18 +6,38 @@ use tauri::{
     AppHandle, Runtime,
 };
 
-pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open My App Spot", true, None::<&str>)?;
-    let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
-    let reindex = MenuItem::with_id(app, "reindex", "Reindex Apps", true, None::<&str>)?;
-    let sep = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &settings, &reindex, &sep, &quit])?;
+use crate::i18n::{self, Key};
 
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .expect("bundled window icon");
+/// Build the tray menu, localized to the current language. Extracted so it can be
+/// rebuilt (via `tray.set_menu`) when the language changes.
+pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let open = MenuItem::with_id(app, "open", i18n::t(app, Key::TrayOpen), true, None::<&str>)?;
+    let settings = MenuItem::with_id(
+        app,
+        "settings",
+        i18n::t(app, Key::TraySettings),
+        true,
+        None::<&str>,
+    )?;
+    let reindex = MenuItem::with_id(
+        app,
+        "reindex",
+        i18n::t(app, Key::TrayReindex),
+        true,
+        None::<&str>,
+    )?;
+    let sep = PredefinedMenuItem::separator(app)?;
+    let quit = MenuItem::with_id(app, "quit", i18n::t(app, Key::TrayQuit), true, None::<&str>)?;
+    Menu::with_items(app, &[&open, &settings, &reindex, &sep, &quit])
+}
+
+pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let menu = build_menu(app)?;
+
+    // Dedicated monochrome menu-bar glyph (a template image — macOS tints it for
+    // light/dark). NOT the full-colour app icon. Regenerate via `mise run make-icons`.
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/menubar.png"))
+        .expect("menu-bar icon");
 
     TrayIconBuilder::with_id("main")
         .icon(icon)

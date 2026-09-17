@@ -8,7 +8,7 @@ use crate::apps::AppEntry;
 use crate::AppState;
 
 pub const DEFAULT_SHORTCUT: &str = "CmdOrCtrl+Shift+Space";
-const SETTINGS_FILE: &str = "settings.json";
+pub(crate) const SETTINGS_FILE: &str = "settings.json";
 const ICON_SIZE: u32 = 64;
 
 // ---------- app list + icons ----------
@@ -318,6 +318,42 @@ pub fn place_launcher<R: Runtime>(app: &AppHandle<R>, win: &tauri::WebviewWindow
     place_on_monitor(win, &mon);
 }
 
+/// How often the background watcher checks whether the cursor moved to a different
+/// monitor (kept slow — this is a proactive nicety, not the source of truth).
+const ACTIVE_MONITOR_POLL_SECS: u64 = 2;
+
+/// While the launcher is HIDDEN, pre-move it to the monitor the cursor is now on, so the
+/// next open has no repositioning to do (avoids any monitor-switch flash at show time).
+/// No-op while it's visible (never yank it out from under the user). Main-thread only.
+fn reposition_hidden_launcher<R: Runtime>(app: &AppHandle<R>) {
+    let Some(win) = app.get_webview_window("launcher") else {
+        return;
+    };
+    if win.is_visible().unwrap_or(false) {
+        return;
+    }
+    let active = active_monitor(&win);
+    let current = window_monitor(&win);
+    let changed = match (&active, &current) {
+        (Some(a), Some(c)) => monitor_key(a) != monitor_key(c),
+        (Some(_), None) => true, // window isn't on any known monitor — reseat it
+        _ => false,
+    };
+    if changed {
+        place_launcher(app, &win);
+    }
+}
+
+/// Spawn a slow background timer that keeps the hidden launcher parked on the active
+/// monitor (see `reposition_hidden_launcher`). The check itself runs on the main thread.
+pub fn watch_active_monitor<R: Runtime>(app: AppHandle<R>) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(ACTIVE_MONITOR_POLL_SECS));
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || reposition_hidden_launcher(&handle));
+    });
+}
+
 /// Persist the launcher's measured content height so the next launch can pre-size the
 /// window to it — avoiding the first-open resize "blink" (the window otherwise opens at
 /// its config height and jumps to fit content on first show). See plan 0018.
@@ -344,18 +380,26 @@ pub fn show_launcher<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let Some(win) = app.get_webview_window("launcher") else {
         return Ok(());
     };
-    // Enqueue the reposition first...
-    place_launcher(app, &win);
-    // ...then show on the next main-thread tick, after set_position has been applied —
-    // otherwise the window flashes at its previous spot before jumping. (set_position is
-    // async; deferring show preserves ordering.)
     let app2 = app.clone();
     let w = win.clone();
     let _ = app.run_on_main_thread(move || {
+        // Reposition to the active monitor and show — both on the main thread and in
+        // this order, so the move is applied synchronously BEFORE the window becomes
+        // visible. Previously set_position ran on the caller (shortcut) thread while
+        // show ran on the main thread; in release the window would flash at its old
+        // monitor/spot for a frame before the async move landed.
+        place_launcher(&app2, &w);
         let _ = w.show();
+        // Menu-bar (accessory) apps don't activate when a window is shown, so the
+        // WKWebView can't take key focus and the search input stays unfocused for up
+        // to a second. Activate the app (like Spotlight) so typing works instantly.
+        #[cfg(target_os = "macos")]
+        crate::macos::activate_app();
         let _ = w.set_focus();
         let _ = app2.emit("launcher:opened", ());
     });
+    // Warm the settings window in the background so ⌘; from here opens instantly.
+    prewarm_settings(app);
     Ok(())
 }
 
@@ -369,20 +413,113 @@ pub fn toggle_launcher<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     show_launcher(app)
 }
 
-const SETTINGS_WIDTH: f64 = 980.0;
+const SETTINGS_WIDTH: f64 = 720.0;
 const SETTINGS_HEIGHT_KEY: &str = "settings_height";
 const SETTINGS_POS_KEY: &str = "settings_pos";
 const SETTINGS_MIN_H: f64 = 520.0;
 const SETTINGS_MAX_H: f64 = 2000.0;
 
+/// How long the settings window lingers (hidden, warm) after it's closed — or after
+/// it's pre-warmed but never opened — before we tear it down to free the webview.
+const SETTINGS_TTL_SECS: u64 = 180;
+
 #[tauri::command]
 pub fn open_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
-    if let Some(win) = app.get_webview_window("settings") {
-        win.show().ok();
-        win.set_focus().ok();
-        return Ok(());
+    let win = match app.get_webview_window("settings") {
+        Some(win) => win,
+        // Not pre-warmed (e.g. opened straight from the tray without opening the
+        // launcher first) — build it now; it'll reveal itself once loaded.
+        None => build_settings_window(&app)?,
+    };
+    let state = app.state::<AppState>();
+    // We're showing it, so cancel any pending teardown timer.
+    cancel_settings_ttl(&app);
+    if state.settings_loaded.load(std::sync::atomic::Ordering::SeqCst) {
+        // Warm and loaded — show instantly.
+        front_settings(&win);
+    } else {
+        // Still loading (freshly built, or mid pre-warm): show it the moment its
+        // page finishes loading, so it never appears as an empty pane.
+        state
+            .settings_wants_show
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
+    Ok(())
+}
 
+/// Lazily pre-warm the settings window (hidden) so a subsequent open is instant. Called
+/// when the launcher opens: if the user then hits ⌘; the webview is already booted.
+/// Built a beat after the launcher shows so its cold-boot doesn't hitch the launcher.
+pub fn prewarm_settings<R: Runtime>(app: &AppHandle<R>) {
+    // Already exists — just extend its lifetime (the user is active).
+    if app.get_webview_window("settings").is_some() {
+        touch_settings_ttl(app);
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let a2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if a2.get_webview_window("settings").is_none() {
+                let _ = build_settings_window(&a2);
+            }
+            touch_settings_ttl(&a2);
+        });
+    });
+}
+
+/// Schedule teardown of the (hidden) settings window after `SETTINGS_TTL_SECS`. Bumps a
+/// generation counter so any earlier timer is invalidated — call it to (re)start the
+/// idle countdown. The window is only destroyed if it's still hidden when the timer fires.
+fn touch_settings_ttl<R: Runtime>(app: &AppHandle<R>) {
+    let gen = app
+        .state::<AppState>()
+        .settings_ttl_gen
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        + 1;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(SETTINGS_TTL_SECS));
+        // Superseded by a newer open/close/prewarm — this timer is stale.
+        if app
+            .state::<AppState>()
+            .settings_ttl_gen
+            .load(std::sync::atomic::Ordering::SeqCst)
+            != gen
+        {
+            return;
+        }
+        let a2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(win) = a2.get_webview_window("settings") {
+                if !win.is_visible().unwrap_or(false) {
+                    let _ = win.destroy();
+                    let s = a2.state::<AppState>();
+                    s.settings_loaded
+                        .store(false, std::sync::atomic::Ordering::SeqCst);
+                    s.settings_wants_show
+                        .store(false, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+        });
+    });
+}
+
+/// Cancel a pending teardown (the window is about to be, or is, shown).
+fn cancel_settings_ttl<R: Runtime>(app: &AppHandle<R>) {
+    app.state::<AppState>()
+        .settings_ttl_gen
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Build the settings window (hidden). Lazily pre-warmed when the launcher opens (see
+/// `prewarm_settings`) so a subsequent open is instant instead of paying a full
+/// WKWebView cold-boot + bundle load. Closing it HIDES (kept warm), and it's torn down
+/// after an idle period. Starts hidden and reveals itself once its page has loaded.
+pub fn build_settings_window<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<tauri::WebviewWindow<R>, String> {
     // Restore the last-used height (width is locked).
     let height = app
         .store(SETTINGS_FILE)
@@ -393,11 +530,11 @@ pub fn open_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
         .unwrap_or(760.0);
 
     let win = tauri::WebviewWindowBuilder::new(
-        &app,
+        app,
         "settings",
         tauri::WebviewUrl::App("index.html".into()),
     )
-    .title("My App Spot Settings")
+    .title(crate::i18n::t(app, crate::i18n::Key::SettingsTitle))
     .inner_size(SETTINGS_WIDTH, height)
     // Lock the width (min == max), allow only height resizing.
     .min_inner_size(SETTINGS_WIDTH, SETTINGS_MIN_H)
@@ -413,24 +550,57 @@ pub fn open_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     // custom (centered, bold) title can sit on the same row as the traffic lights.
     .title_bar_style(tauri::TitleBarStyle::Overlay)
     .hidden_title(true)
+    // Created hidden and warmed in the background; revealed once its page has loaded
+    // (either right away if a show is already pending, or by `open_settings` later).
+    .visible(false)
+    .on_page_load(|window, payload| {
+        if payload.event() == tauri::webview::PageLoadEvent::Finished {
+            let app = window.app_handle();
+            let state = app.state::<AppState>();
+            state
+                .settings_loaded
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            // If an open was requested before we finished loading, honour it now.
+            if state
+                .settings_wants_show
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                front_settings(&window);
+            }
+        }
+    })
     .build()
     .map_err(|e| e.to_string())?;
 
     // Open on the active monitor (the one under the cursor), restoring the saved position
     // for that monitor if it's still valid; otherwise the OS centers it there.
     if let Some(mon) = active_monitor(&win) {
-        if let Some((x, y)) = load_pos_for_monitor(&app, SETTINGS_POS_KEY, &monitor_key(&mon)) {
+        if let Some((x, y)) = load_pos_for_monitor(app, SETTINGS_POS_KEY, &monitor_key(&mon)) {
             if within_monitor(&mon, x, y) {
                 let _ = win.set_position(PhysicalPosition::new(x, y));
             }
         }
     }
 
-    // Persist height (on resize) and position (on move) so they're restored next open.
+    // Persist height (on resize) and position (on move) so they're restored next open;
+    // and intercept close so the window HIDES (stays warm) instead of being destroyed.
     let scale = win.scale_factor().unwrap_or(2.0);
     let app_for_event = app.clone();
     let last_h = std::sync::Mutex::new(0.0_f64);
     win.on_window_event(move |event| match event {
+        tauri::WindowEvent::CloseRequested { api, .. } => {
+            // Hide (keep warm) instead of destroying, and start the idle countdown that
+            // tears it down if it isn't reopened within SETTINGS_TTL_SECS.
+            api.prevent_close();
+            app_for_event
+                .state::<AppState>()
+                .settings_wants_show
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            if let Some(win) = app_for_event.get_webview_window("settings") {
+                let _ = win.hide();
+            }
+            touch_settings_ttl(&app_for_event);
+        }
         tauri::WindowEvent::Resized(size) => {
             let h = (size.height as f64 / scale).round();
             if !(SETTINGS_MIN_H..=SETTINGS_MAX_H).contains(&h) {
@@ -462,10 +632,22 @@ pub fn open_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
         _ => {}
     });
 
-    // Match the saved theme (light/dark/system) so the window doesn't open in the
-    // wrong appearance.
-    apply_theme(&app);
-    Ok(())
+    // Match the saved theme (light/dark/system) so the window opens in the right
+    // appearance. (Applied while still hidden.)
+    apply_theme(app);
+    Ok(win)
+}
+
+/// Bring the settings window to the front, focused. Menu-bar (accessory) apps must
+/// activate the app or the window opens behind whatever's frontmost.
+fn front_settings<R: Runtime>(win: &tauri::WebviewWindow<R>) {
+    let w = win.clone();
+    let _ = win.run_on_main_thread(move || {
+        let _ = w.show();
+        #[cfg(target_os = "macos")]
+        crate::macos::activate_app();
+        let _ = w.set_focus();
+    });
 }
 
 // ---------- settings store ----------
@@ -475,6 +657,9 @@ fn defaults() -> Value {
         "shortcut": DEFAULT_SHORTCUT,
         "menubar_visible": true,
         "theme": "system",
+        "launcher_style": "glass",
+        "language": "system",
+        "font_scale": "normal",
         "result_limit": 10,
         "frecency": {},
     })
@@ -507,6 +692,23 @@ pub fn set_setting<R: Runtime>(
     Ok(())
 }
 
+/// The language preference for the UI: the raw `setting` ("system" | "en-US" | "pt-BR")
+/// plus the resolved `effective` tag the frontend should load its catalog for.
+#[tauri::command]
+pub fn language<R: Runtime>(app: AppHandle<R>) -> Value {
+    json!({
+        "setting": crate::i18n::setting(&app),
+        "effective": crate::i18n::resolve(&app).as_tag(),
+    })
+}
+
+/// Relaunch the app (used as a fallback to fully apply a language change if a native
+/// surface couldn't be swapped live).
+#[tauri::command]
+pub fn restart_app<R: Runtime>(app: AppHandle<R>) {
+    app.restart();
+}
+
 fn apply_side_effect<R: Runtime>(app: &AppHandle<R>, key: &str, value: &Value) {
     match key {
         "menubar_visible" => {
@@ -514,9 +716,59 @@ fn apply_side_effect<R: Runtime>(app: &AppHandle<R>, key: &str, value: &Value) {
                 let _ = tray.set_visible(value.as_bool().unwrap_or(true));
             }
         }
-        "theme" => apply_theme(app),
+        "theme" | "launcher_style" => apply_theme(app),
+        "language" => apply_language(app),
+        // Pure CSS concern (root font-size): just notify both windows to re-apply.
+        "font_scale" => {
+            let _ = app.emit("font:changed", json!({ "scale": value.as_str() }));
+        }
         _ => {}
     }
+}
+
+/// Re-localize the native surfaces after a language change and tell the frontend to
+/// re-render. Rebuilds the tray + app menus and retitles the Settings window; any
+/// surface that can't be swapped live sets `needs_restart` so the UI can offer a
+/// restart to finish applying.
+fn apply_language<R: Runtime>(app: &AppHandle<R>) {
+    let lang = crate::i18n::resolve(app);
+    let mut needs_restart = false;
+
+    // Tray menu.
+    if let Some(tray) = app.tray_by_id("main") {
+        match crate::tray::build_menu(app) {
+            Ok(menu) => {
+                if tray.set_menu(Some(menu)).is_err() {
+                    needs_restart = true;
+                }
+            }
+            Err(_) => needs_restart = true,
+        }
+    }
+
+    // Native app menu (Edit/Window titles).
+    match crate::build_app_menu(app) {
+        Ok(menu) => {
+            if app.set_menu(menu).is_err() {
+                needs_restart = true;
+            }
+        }
+        Err(_) => needs_restart = true,
+    }
+
+    // Settings window title (if open).
+    if let Some(win) = app.get_webview_window("settings") {
+        let title = crate::i18n::tr(lang, crate::i18n::Key::SettingsTitle).to_string();
+        let w = win.clone();
+        let _ = win.run_on_main_thread(move || {
+            let _ = w.set_title(&title);
+        });
+    }
+
+    let _ = app.emit(
+        "language:changed",
+        json!({ "lang": lang.as_tag(), "needs_restart": needs_restart }),
+    );
 }
 
 /// The saved theme preference: "system" | "light" | "dark" (defaults to system).
@@ -528,9 +780,19 @@ fn current_theme<R: Runtime>(app: &AppHandle<R>) -> String {
         .unwrap_or_else(|| "system".into())
 }
 
-/// Apply the saved theme to every window's native appearance. On macOS the
-/// NSWindow appearance cascades to the WKWebView, so the web content's
-/// `prefers-color-scheme` (and our `dark:` styles) follow along. No-op elsewhere.
+/// The launcher's saved surface style: "glass" | "glass_clear" | "vibrancy".
+/// Falls back to "glass" on macOS 26+ (Liquid Glass) and "vibrancy" elsewhere.
+fn current_launcher_style<R: Runtime>(app: &AppHandle<R>) -> String {
+    app.store(SETTINGS_FILE)
+        .ok()
+        .and_then(|s| s.get("launcher_style"))
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| "glass".into())
+}
+
+/// Apply the saved theme + launcher surface to the windows. On macOS the NSWindow
+/// appearance cascades to the WKWebView, so the web content's `prefers-color-scheme`
+/// (and our `dark:` styles) follow along. No-op elsewhere.
 pub fn apply_theme<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(target_os = "macos")]
     {
@@ -539,21 +801,31 @@ pub fn apply_theme<R: Runtime>(app: &AppHandle<R>) {
             "dark" => Some(true),
             _ => None, // system
         };
-        // The launcher is translucent: its vibrancy material must switch too, or a
-        // light theme leaves dark HUD glass behind readable light-mode text.
+        let style = current_launcher_style(app);
+        // Launcher: set appearance, then (re)apply the chosen translucent surface.
         if let Some(win) = app.get_webview_window("launcher") {
             let w = win.clone();
             let _ = win.run_on_main_thread(move || {
                 if let Ok(ptr) = w.ns_window() {
                     crate::macos::set_appearance(ptr, dark);
-                    let is_dark = dark.unwrap_or_else(|| crate::macos::is_dark(ptr));
+                    // Start clean so switching styles never stacks surfaces.
+                    crate::macos::clear_glass(ptr);
                     let _ = window_vibrancy::clear_vibrancy(&w);
-                    let _ = window_vibrancy::apply_vibrancy(
-                        &w,
-                        crate::macos::launcher_material(is_dark),
-                        Some(window_vibrancy::NSVisualEffectState::Active),
-                        Some(16.0),
-                    );
+                    let want_glass = style == "glass" || style == "glass_clear";
+                    let applied = want_glass
+                        && crate::macos::apply_liquid_glass(ptr, 16.0, style == "glass_clear");
+                    if !applied {
+                        // "vibrancy", or glass unavailable (pre-macOS 26): frosted material.
+                        let is_dark = dark.unwrap_or_else(|| crate::macos::is_dark(ptr));
+                        let _ = window_vibrancy::apply_vibrancy(
+                            &w,
+                            crate::macos::launcher_material(is_dark),
+                            Some(window_vibrancy::NSVisualEffectState::Active),
+                            Some(16.0),
+                        );
+                    }
+                    // Clip to the rounded card so the glass rim doesn't show as a border.
+                    crate::macos::round_launcher_content(ptr, 16.0);
                 }
             });
         }
@@ -600,6 +872,25 @@ pub fn set_shortcut<R: Runtime>(app: AppHandle<R>, accelerator: String) -> Resul
 
 const FAVORITES_KEY: &str = "favorites";
 const MAX_FAVORITES: usize = 10;
+/// Persisted mirror of the StoreKit "unlock favorites" entitlement.
+const FAV_PURCHASED_KEY: &str = "favorites_purchased";
+
+/// Has the user bought the favorites unlock (owned forever)? True if StoreKit
+/// reports the entitlement, or the persisted mirror flag is set.
+pub fn favorites_purchased<R: Runtime>(app: &AppHandle<R>) -> bool {
+    crate::iap::is_purchased()
+        || app
+            .store(SETTINGS_FILE)
+            .ok()
+            .and_then(|s| s.get(FAV_PURCHASED_KEY))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+}
+
+/// Are favorites usable right now? Purchased forever, or unlocked for this session.
+pub fn favorites_unlocked<R: Runtime>(app: &AppHandle<R>, state: &AppState) -> bool {
+    favorites_purchased(app) || state.fav_session.load(std::sync::atomic::Ordering::SeqCst)
+}
 
 /// The ordered list of pinned app paths.
 #[tauri::command]
@@ -612,8 +903,16 @@ pub fn get_favorites<R: Runtime>(app: AppHandle<R>) -> Vec<String> {
 }
 
 /// Replace the favorites list (add / remove / reorder in one call). De-duped, capped at 10.
+/// Refuses when favorites aren't unlocked (UI won't call it either — defense in depth).
 #[tauri::command]
-pub fn set_favorites<R: Runtime>(app: AppHandle<R>, paths: Vec<String>) -> Result<(), String> {
+pub fn set_favorites<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    if !favorites_unlocked(&app, &state) {
+        return Err(crate::i18n::t(&app, crate::i18n::Key::ErrUnlockFavorites));
+    }
     let mut seen = std::collections::HashSet::new();
     let list: Vec<String> = paths
         .into_iter()
@@ -627,8 +926,105 @@ pub fn set_favorites<R: Runtime>(app: AppHandle<R>, paths: Vec<String>) -> Resul
     Ok(())
 }
 
+/// Entitlement + product info for the favorites unlock, for the paywall UI.
+#[tauri::command]
+pub fn favorites_status<R: Runtime>(app: AppHandle<R>, state: State<'_, AppState>) -> Value {
+    json!({
+        "unlocked": favorites_unlocked(&app, &state),
+        "purchased": favorites_purchased(&app),
+        "purchasable": crate::iap::purchasable(),
+        "price": crate::iap::price(),
+    })
+}
+
+/// Free "unlock for this session" — lasts until the app quits.
+#[tauri::command]
+pub fn unlock_favorites_session<R: Runtime>(app: AppHandle<R>, state: State<'_, AppState>) {
+    state
+        .fav_session
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = app.emit("favorites:unlocked", ());
+}
+
+/// Buy the non-consumable unlock (StoreKit). Persists the mirror flag on success.
+#[tauri::command]
+pub fn purchase_favorites<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    crate::iap::purchase().map_err(|e| crate::i18n::t(&app, e.key()))?;
+    mark_favorites_purchased(&app);
+    let _ = app.emit("favorites:unlocked", ());
+    Ok(())
+}
+
+/// Restore a previous purchase (StoreKit). Returns true if something was restored.
+#[tauri::command]
+pub fn restore_favorites<R: Runtime>(app: AppHandle<R>) -> Result<bool, String> {
+    let restored = crate::iap::restore().map_err(|e| crate::i18n::t(&app, e.key()))?;
+    if restored {
+        mark_favorites_purchased(&app);
+        let _ = app.emit("favorites:unlocked", ());
+    }
+    Ok(restored)
+}
+
+/// Persist the "owned forever" mirror flag (source of truth is StoreKit, but this
+/// keeps the frontend consistent across launches without a StoreKit round-trip).
+pub fn mark_favorites_purchased<R: Runtime>(app: &AppHandle<R>) {
+    if let Ok(store) = app.store(SETTINGS_FILE) {
+        store.set(FAV_PURCHASED_KEY, json!(true));
+        let _ = store.save();
+    }
+}
+
 /// Temporarily unregister the global shortcut so the settings capture box can receive the
 /// key combo itself (instead of the global handler firing / opening the launcher).
+/// Fully quit the app (there is no ⌘Q quit; this is the explicit Quit action).
+#[tauri::command]
+pub fn quit_app<R: Runtime>(app: AppHandle<R>) {
+    app.exit(0);
+}
+
+/// Whether the app is set to open at login (macOS SMAppService).
+#[tauri::command]
+pub fn get_login_item() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        crate::macos::login_item_enabled()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+/// Enable/disable "open at login".
+#[tauri::command]
+pub fn set_login_item<R: Runtime>(app: AppHandle<R>, enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        crate::macos::set_login_item(enabled).map_err(|e| match e {
+            crate::macos::LoginError::Os(s) => s,
+            other => crate::i18n::t(&app, other.key()),
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, enabled);
+        Ok(())
+    }
+}
+
+/// Open System Settings at the Keyboard pane, where the macOS Spotlight ⌘Space
+/// shortcut lives (Keyboard Shortcuts → Spotlight), so the user can free it up.
+#[tauri::command]
+pub fn open_keyboard_settings() {
+    #[cfg(target_os = "macos")]
+    {
+        // Modern System Settings (macOS 13+). Opens Keyboard settings; the user then
+        // taps "Keyboard Shortcuts…" → Spotlight.
+        let _ = crate::macos::open_url("x-apple.systempreferences:com.apple.Keyboard-Settings.extension");
+    }
+}
+
 #[tauri::command]
 pub fn suspend_shortcut<R: Runtime>(app: AppHandle<R>) {
     crate::shortcut::unregister_all(&app);
@@ -760,10 +1156,13 @@ pub fn grant_folder<R: Runtime>(app: AppHandle<R>) -> Result<Option<String>, Str
     #[cfg(target_os = "macos")]
     {
         use base64::Engine;
+        let lang = crate::i18n::resolve(&app);
+        let prompt = crate::i18n::tr(lang, crate::i18n::Key::PickerPrompt).to_string();
+        let message = crate::i18n::tr(lang, crate::i18n::Key::PickerMessage).to_string();
         // NSOpenPanel must run on the main thread.
         let (tx, rx) = std::sync::mpsc::channel();
         app.run_on_main_thread(move || {
-            let _ = tx.send(crate::permissions::pick_folder());
+            let _ = tx.send(crate::permissions::pick_folder(&prompt, &message));
         })
         .map_err(|e| e.to_string())?;
 
@@ -773,7 +1172,7 @@ pub fn grant_folder<R: Runtime>(app: AppHandle<R>) -> Result<Option<String>, Str
 
         // Reject folders already covered by the default system scan or an existing grant.
         if let Some(base) = folder_already_covered(&app, &path) {
-            return Err(format!("“{path}” is already searched (via {base})."));
+            return Err(crate::i18n::already_searched(lang, &path, &base));
         }
 
         let mut list = read_bookmarks(&app);

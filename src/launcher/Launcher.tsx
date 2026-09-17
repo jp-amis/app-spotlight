@@ -12,10 +12,12 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { rank, type AppEntry, type Frecency } from "../lib/fuzzy";
 import {
   accessStatus,
+  favoritesStatus,
   getFavorites,
   getSettings,
   grantFolder,
   hideLauncher,
+  indexStatus,
   launchApp,
   listApps,
   openSettings,
@@ -24,6 +26,8 @@ import {
   setLauncherHeight,
 } from "../lib/api";
 import AppIcon from "./AppIcon";
+import { initI18n, t } from "../lib/i18n";
+import { fontScale, initFontScale } from "../lib/fontscale";
 
 const BANNER_DISMISS_KEY = "accessBannerDismissed";
 
@@ -35,7 +39,9 @@ export default function Launcher() {
   const [selected, setSelected] = createSignal(0);
   const [frecency, setFrecency] = createSignal<Frecency>({});
   const [favorites, setFavorites] = createSignal<string[]>([]);
+  const [favUnlocked, setFavUnlocked] = createSignal(false);
   const [limit, setLimit] = createSignal(10);
+  const [indexing, setIndexing] = createSignal(false);
   const [accessLimited, setAccessLimited] = createSignal(false);
   const [bannerDismissed, setBannerDismissed] = createSignal(
     localStorage.getItem(BANNER_DISMISS_KEY) === "1",
@@ -84,7 +90,11 @@ export default function Launcher() {
 
   async function refreshFavorites() {
     try {
-      setFavorites(await getFavorites());
+      // Favorites are a paid/unlockable feature — only apply them when unlocked,
+      // otherwise the launcher ranks by frecency alone (no pins, no ⌘-badges).
+      const [status, favs] = await Promise.all([favoritesStatus(), getFavorites()]);
+      setFavUnlocked(status.unlocked);
+      setFavorites(status.unlocked ? favs : []);
     } catch {
       /* no backend */
     }
@@ -108,6 +118,7 @@ export default function Launcher() {
   createEffect(() => {
     results(); // re-measure whenever the visible results change
     showBanner(); // ...or when the access banner appears/disappears
+    fontScale(); // ...or when the UI text size changes (rows grow/shrink)
     requestAnimationFrame(syncWindowHeight);
   });
 
@@ -129,12 +140,32 @@ export default function Launcher() {
     }
   }
 
+  // Whether the backend is (re)building the app index right now — used to show a
+  // "building" hint on the very first launch, before any apps are indexed yet.
+  async function refreshIndexing() {
+    try {
+      setIndexing((await indexStatus()).indexing);
+    } catch {
+      /* no backend */
+    }
+  }
+
+  // Focus the search input. WKWebView can drop focus right as the window shows, so
+  // try now and again next frame.
+  function focusInput() {
+    inputEl?.focus();
+    requestAnimationFrame(() => inputEl?.focus());
+  }
+
   onMount(() => {
+    void initI18n();
+    void initFontScale();
     void refreshApps();
     void refreshSettings();
     void refreshAccess();
     void refreshFavorites();
-    inputEl?.focus();
+    void refreshIndexing();
+    focusInput();
 
     // Backend fires this each time the window is shown via the global shortcut.
     const un = listen("launcher:opened", () => {
@@ -143,7 +174,8 @@ export default function Launcher() {
       void refreshSettings();
       void refreshAccess();
       void refreshFavorites();
-      queueMicrotask(() => inputEl?.focus());
+      void refreshIndexing();
+      focusInput();
     });
     // A grant from the Settings window reindexes; refresh our list when it does.
     const un2 = listen("apps:reindexed", () => {
@@ -151,10 +183,20 @@ export default function Launcher() {
       void refreshAccess();
     });
     const un3 = listen("favorites:changed", () => void refreshFavorites());
+    const un4 = listen("favorites:unlocked", () => void refreshFavorites());
+    // First-launch indexing lifecycle: show the hint while building, refresh when done.
+    const un5 = listen("index:start", () => setIndexing(true));
+    const un6 = listen("index:done", () => {
+      setIndexing(false);
+      void refreshApps();
+    });
     onCleanup(() => {
       void un.then((f) => f());
       void un2.then((f) => f());
       void un3.then((f) => f());
+      void un4.then((f) => f());
+      void un5.then((f) => f());
+      void un6.then((f) => f());
     });
   });
 
@@ -168,6 +210,7 @@ export default function Launcher() {
 
   // ⌘P: pin/unpin the selected app (no-op when pinning past the limit).
   async function togglePin(entry?: AppEntry) {
+    if (!favUnlocked()) return; // favorites is a locked feature
     const target = entry ?? results()[selected()];
     if (!target) return;
     const favs = favorites();
@@ -187,6 +230,7 @@ export default function Launcher() {
   // ⌘K/⌘[ (up) and ⌘J/⌘] (down): reorder the selected app within the pinned
   // list. Only applies when the selected app is itself pinned.
   async function movePinned(dir: -1 | 1) {
+    if (!favUnlocked()) return; // favorites is a locked feature
     const target = results()[selected()];
     if (!target) return;
     const favs = [...favorites()];
@@ -229,8 +273,8 @@ export default function Launcher() {
       void openSettings();
       return;
     }
-    // ⌘Q closes the launcher (it never quits the app).
-    if (e.metaKey && e.code === "KeyQ") {
+    // ⌘Q closes the launcher (it never quits the app; ⌘⇧Q quits, via the menu).
+    if (e.metaKey && !e.shiftKey && e.code === "KeyQ") {
       e.preventDefault();
       void hideLauncher();
       return;
@@ -307,8 +351,7 @@ export default function Launcher() {
     <div
       ref={rootEl}
       class="flex w-screen flex-col overflow-hidden rounded-2xl
-             text-neutral-900 ring-1 ring-black/10
-             dark:text-neutral-100 dark:ring-white/10"
+             text-neutral-900 dark:text-neutral-100"
       onKeyDown={onKeyDown}
     >
       {/* draggable search header */}
@@ -321,30 +364,46 @@ export default function Launcher() {
             setQuery(e.currentTarget.value);
             setSelected(0);
           }}
-          placeholder="Search apps…"
+          placeholder={t("launcher.search")}
           spellcheck={false}
           autocapitalize="off"
           autocomplete="off"
-          class="w-full bg-transparent text-2xl font-light outline-none
+          class="min-w-0 flex-1 bg-transparent text-2xl font-light outline-none
                  placeholder:text-neutral-500 dark:placeholder:text-neutral-500"
         />
+        {/* Settings shortcut — only on an empty query, where the header has room. */}
+        <Show when={query().length === 0}>
+          <button
+            type="button"
+            title={t("launcher.openSettings")}
+            aria-label={t("launcher.openSettings")}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => {
+              void hideLauncher();
+              void openSettings();
+            }}
+            class="flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 text-xs
+                   text-neutral-500 transition-colors hover:bg-black/5 hover:text-neutral-800
+                   dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-neutral-200"
+          >
+            <GearGlyph />
+            <span class="tabular-nums">⌘;</span>
+          </button>
+        </Show>
       </div>
 
       <Show when={showBanner()}>
         <div class="mx-3 mb-2 flex items-center gap-2 rounded-xl bg-amber-500/15 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-          <span class="flex-1">
-            Some apps may be hidden. My App Spot is sandboxed — grant a folder (e.g. your
-            Applications) to find more.
-          </span>
+          <span class="flex-1">{t("launcher.accessBanner")}</span>
           <button
             onClick={() => void grant()}
             class="rounded-lg bg-amber-500/25 px-2 py-1 font-medium hover:bg-amber-500/40"
           >
-            Grant Access
+            {t("launcher.grantAccess")}
           </button>
           <button
             onClick={dismissBanner}
-            aria-label="Dismiss"
+            aria-label={t("launcher.dismiss")}
             class="px-1 text-amber-700/70 hover:text-amber-700 dark:text-amber-300/70"
           >
             ✕
@@ -352,7 +411,17 @@ export default function Launcher() {
         </div>
       </Show>
 
-      <Show when={results().length > 0} fallback={<Empty query={query()} />}>
+      <Show
+        when={results().length > 0}
+        fallback={
+          <Show
+            when={indexing() && apps().length === 0}
+            fallback={<Empty query={query()} />}
+          >
+            <Indexing />
+          </Show>
+        }
+      >
         <ul class="max-h-[520px] overflow-y-auto px-2 pb-2">
           <For each={results()}>
             {(app, i) => (
@@ -402,11 +471,11 @@ function Row(props: {
       }}
     >
       <AppIcon path={props.app.path} />
-      <span class="flex-1 truncate text-[15px]">{props.app.name}</span>
+      <span class="flex-1 truncate text-[0.9375rem]">{props.app.name}</span>
       {/* pinned indicator */}
       <Show when={props.pinned}>
         <span
-          aria-label="Pinned"
+          aria-label={t("launcher.pinned")}
           class="shrink-0 text-xs"
           classList={{
             "text-white/80": props.active,
@@ -436,7 +505,17 @@ function Row(props: {
 function Empty(props: { query: string }) {
   return (
     <div class="flex h-20 items-center justify-center text-sm text-neutral-400">
-      {props.query ? "No matching apps" : "Start typing to search"}
+      {props.query ? t("launcher.noMatch") : t("launcher.startTyping")}
+    </div>
+  );
+}
+
+// First-launch state: the index is still being built, so there's nothing to show yet.
+function Indexing() {
+  return (
+    <div class="flex h-20 items-center justify-center gap-2 text-sm text-neutral-400">
+      <span class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent opacity-70" />
+      <span>{t("launcher.indexing")}</span>
     </div>
   );
 }
@@ -452,6 +531,21 @@ function SearchGlyph() {
     >
       <circle cx="11" cy="11" r="7" />
       <path d="m21 21-4.3-4.3" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+function GearGlyph() {
+  return (
+    <svg
+      class="h-4 w-4 shrink-0"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }

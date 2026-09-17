@@ -1,0 +1,314 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="1024"
+   height="1024"
+   viewBox="0 0 1024 1024"
+   version="1.1"
+   id="svg24"
+   sodipodi:docname="app-icon-light.svg"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview24"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="1.71875"
+     inkscape:cx="635.34545"
+     inkscape:cy="663.85455"
+     inkscape:window-width="1280"
+     inkscape:window-height="2101"
+     inkscape:window-x="5120"
+     inkscape:window-y="606"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="svg24" />
+  <!-- ===================================================================
+       App icon — "spotlight buddy": a glowing cone-of-light character with a
+       face and little legs, holding a magnifier. Brand indigo background.
+       Edit in Inkscape, then: mise run make-icons
+       =================================================================== -->
+  <defs
+     id="defs8">
+    <linearGradient
+       id="bg"
+       x1="0"
+       y1="0"
+       x2="0"
+       y2="1">
+      <stop
+         offset="0"
+         stop-color="#6D5EF7"
+         id="stop1" />
+      <stop
+         offset="1"
+         stop-color="#4A2FD0"
+         id="stop2" />
+    </linearGradient>
+    <radialGradient
+       id="sheen"
+       cx="0.5"
+       cy="0.08"
+       r="0.95">
+      <stop
+         offset="0"
+         stop-color="#ffffff"
+         stop-opacity="0.22"
+         id="stop3" />
+      <stop
+         offset="0.6"
+         stop-color="#ffffff"
+         stop-opacity="0"
+         id="stop4" />
+    </radialGradient>
+    <linearGradient
+       id="bodyfill"
+       x1="264.84642"
+       y1="237.42023"
+       x2="398.5109"
+       y2="682.96849"
+       gradientTransform="matrix(1.0458946,0,0,0.95611929,-69.818182,101.23636)"
+       gradientUnits="userSpaceOnUse">
+      <stop
+         offset="0"
+         stop-color="#ffffff"
+         id="stop5" />
+      <stop
+         offset="1"
+         stop-color="#ECE7FF"
+         id="stop6" />
+    </linearGradient>
+    <linearGradient
+       id="lens"
+       x1="766"
+       y1="332"
+       x2="766"
+       y2="476"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(0.59691033,0,0,0.59691033,280.45889,182.36718)">
+      <stop
+         offset="0"
+         stop-color="#FFF4C2"
+         id="stop7" />
+      <stop
+         offset="1"
+         stop-color="#FFD64A"
+         id="stop8" />
+    </linearGradient>
+    <filter
+       id="glow"
+       x="-0.12571429"
+       y="-0.13894737"
+       width="1.2514286"
+       height="1.2778947">
+      <feGaussianBlur
+         stdDeviation="22"
+         id="feGaussianBlur8" />
+    </filter>
+  </defs>
+  <!-- background -->
+  <rect
+     x="100"
+     y="100"
+     width="824"
+     height="824"
+     rx="185"
+     fill="url(#bg)"
+     id="rect8" />
+  <rect
+     x="100"
+     y="100"
+     width="824"
+     height="824"
+     rx="185"
+     fill="url(#sheen)"
+     id="rect9" />
+  <!-- ground shadow -->
+  <ellipse
+     cx="474.39999"
+     cy="762.43634"
+     rx="205"
+     ry="34"
+     fill="#2a1a7a"
+     opacity="0.4"
+     id="ellipse9" />
+  <!-- light rays around the top, so it clearly reads as a LIGHT -->
+  <!-- soft glow halo so the body looks luminous -->
+  <line
+     x1="753.21185"
+     y1="452.17065"
+     x2="729.33545"
+     y2="483.20999"
+     stroke="#241b3a"
+     stroke-width="17.9073"
+     stroke-linecap="round"
+     id="line20" />
+  <circle
+     cx="780.66974"
+     cy="423.51895"
+     r="42.977543"
+     fill="url(#lens)"
+     id="circle21"
+     style="fill:url(#lens);stroke-width:0.59691" />
+  <circle
+     cx="780.66974"
+     cy="423.51895"
+     r="42.977543"
+     fill="none"
+     stroke="#241b3a"
+     stroke-width="13.132"
+     id="circle22" />
+  <path
+     d="m 762.76244,409.1931 q 7.16293,-8.35674 20.29495,-8.35674"
+     fill="none"
+     stroke="#ffffff"
+     stroke-width="6.56601"
+     stroke-linecap="round"
+     opacity="0.85"
+     id="path22" />
+  <g
+     stroke="#ffd64a"
+     stroke-width="13"
+     stroke-linecap="round"
+     id="g24"
+     transform="matrix(0.59691033,0,0,0.59691033,280.4589,182.36718)">
+    <line
+       x1="922"
+       y1="336"
+       x2="948"
+       y2="320"
+       id="line22" />
+    <line
+       x1="930"
+       y1="378"
+       x2="960"
+       y2="372"
+       id="line23" />
+    <line
+       x1="900"
+       y1="300"
+       x2="914"
+       y2="274"
+       id="line24" />
+  </g>
+  <path
+     d="m 425.09091,300.61818 -160,380 420,-70 z"
+     fill="#ffffff"
+     opacity="0.45"
+     filter="url(#glow)"
+     id="path13" />
+  <!-- limbs (behind body) -->
+  <g
+     fill="none"
+     stroke="#241b3a"
+     stroke-width="22"
+     stroke-linecap="round"
+     id="g16"
+     transform="translate(-34.909091,50.618182)">
+    <path
+       d="m 352,560 q -72,25 -102,72"
+       id="path14" />
+    <path
+       d="m 646.30909,526.23637 q 72,-25 102,-72"
+       id="path14-6" />
+    <path
+       d="m 432,616 -30,90"
+       id="path15" />
+    <path
+       d="m 520,600 36,88"
+       id="path16" />
+  </g>
+  <g
+     fill="#241b3a"
+     id="g17"
+     transform="translate(-34.909091,50.618182)">
+    <ellipse
+       cx="392"
+       cy="712"
+       rx="30"
+       ry="16"
+       id="ellipse16" />
+    <ellipse
+       cx="566"
+       cy="694"
+       rx="30"
+       ry="16"
+       id="ellipse17" />
+    <circle
+       cx="248"
+       cy="636"
+       r="17"
+       id="circle17" />
+    <circle
+       cx="758.49091"
+       cy="440.40002"
+       r="17"
+       id="circle17-1"
+       inkscape:transform-center-x="408.43636"
+       inkscape:transform-center-y="92.509091" />
+  </g>
+  <path
+     d="m 425.09091,300.61818 -160,380 420,-70 z"
+     fill="url(#bodyfill)"
+     stroke="url(#bodyfill)"
+     stroke-width="46"
+     stroke-linejoin="round"
+     id="path25"
+     style="fill:url(#bodyfill);stroke:url(#bodyfill)" />
+  <!-- body (cone of light) -->
+  <path
+     d="m 425.09091,300.61818 -160,380 420,-70 z"
+     fill="url(#bodyfill)"
+     stroke="url(#bodyfill)"
+     stroke-width="46"
+     stroke-linejoin="round"
+     id="path17"
+     style="display:none;fill:url(#bodyfill);stroke:url(#bodyfill)" />
+  <!-- clean centered hat tip + pom -->
+  <path
+     d="m 418.94546,255.23636 -47.23636,112.8 123.63636,-19.50909 z"
+     fill="#241b3a"
+     id="path18"
+     sodipodi:nodetypes="cccc" />
+  <circle
+     cx="421.47311"
+     cy="261.44229"
+     r="23"
+     fill="#241b3a"
+     id="circle18" />
+  <!-- face -->
+  <g
+     fill="#241b3a"
+     id="g19"
+     transform="translate(-34.909091,50.618182)">
+    <ellipse
+       cx="452"
+       cy="470"
+       rx="15"
+       ry="24"
+       id="ellipse18" />
+    <ellipse
+       cx="536"
+       cy="466"
+       rx="15"
+       ry="24"
+       id="ellipse19" />
+  </g>
+  <path
+     d="m 435.09091,558.61818 q 25,26 52,-2"
+     fill="none"
+     stroke="#241b3a"
+     stroke-width="11"
+     stroke-linecap="round"
+     id="path19" />
+  <!-- right arm ending in a fist that grips the magnifier handle -->
+  <!-- magnifier -->
+  <!-- fist -->
+  <!-- sparkles -->
+</svg>

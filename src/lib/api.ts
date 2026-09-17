@@ -6,15 +6,46 @@ export interface Settings {
   shortcut: string;
   menubar_visible: boolean;
   theme: "system" | "light" | "dark";
+  launcher_style: "glass" | "glass_clear" | "vibrancy";
+  language: "system" | "en-US" | "pt-BR";
+  font_scale: "smaller" | "normal" | "bigger" | "extra_big";
   result_limit: number;
   frecency: Frecency;
 }
+
+export interface LanguageInfo {
+  setting: "system" | "en-US" | "pt-BR";
+  effective: "en-US" | "pt-BR";
+}
+export const getLanguage = () => invoke<LanguageInfo>("language");
+export const restartApp = () => invoke<void>("restart_app");
 
 export const listApps = () => invoke<AppEntry[]>("list_apps");
 
 export const getFavorites = () => invoke<string[]>("get_favorites");
 export const setFavorites = (paths: string[]) =>
   invoke<void>("set_favorites", { paths });
+
+export interface FavoritesStatus {
+  unlocked: boolean; // usable now (purchased OR session-unlocked)
+  purchased: boolean; // owned forever
+  purchasable: boolean; // StoreKit product available (App Store build)
+  price: string | null; // localized price, when purchasable
+}
+export const favoritesStatus = () =>
+  invoke<FavoritesStatus>("favorites_status");
+export const unlockFavoritesSession = () =>
+  invoke<void>("unlock_favorites_session");
+export const purchaseFavorites = () => invoke<void>("purchase_favorites");
+export const restoreFavorites = () => invoke<boolean>("restore_favorites");
+
+export const getLoginItem = () => invoke<boolean>("get_login_item");
+export const setLoginItem = (enabled: boolean) =>
+  invoke<void>("set_login_item", { enabled });
+
+export const quitApp = () => invoke<void>("quit_app");
+export const openKeyboardSettings = () =>
+  invoke<void>("open_keyboard_settings");
 
 export interface AccessStatus {
   limited: boolean;

@@ -28,8 +28,9 @@ pub fn real_home() -> Option<PathBuf> {
 }
 
 /// Show a folder picker (must run on the main thread) and, on selection, return the
-/// chosen path plus a security-scoped bookmark blob to persist.
-pub fn pick_folder() -> Option<(String, Vec<u8>)> {
+/// chosen path plus a security-scoped bookmark blob to persist. `prompt` and
+/// `message` are the (already-localized) panel button + description text.
+pub fn pick_folder(prompt: &str, message: &str) -> Option<(String, Vec<u8>)> {
     let mtm = MainThreadMarker::new()?;
 
     // Accessory app: bring it forward so the panel is visible + frontmost.
@@ -41,10 +42,8 @@ pub fn pick_folder() -> Option<(String, Vec<u8>)> {
     panel.setCanChooseDirectories(true);
     panel.setCanChooseFiles(false);
     panel.setAllowsMultipleSelection(false);
-    panel.setPrompt(Some(&NSString::from_str("Grant Access")));
-    panel.setMessage(Some(&NSString::from_str(
-        "Choose a folder for My App Spot to search (e.g. your Applications folder).",
-    )));
+    panel.setPrompt(Some(&NSString::from_str(prompt)));
+    panel.setMessage(Some(&NSString::from_str(message)));
 
     // Default the panel to the real ~/Applications if we can name it.
     if let Some(home) = real_home() {

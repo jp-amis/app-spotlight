@@ -1983,6 +1983,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "myappspot"
+version = "1.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "notify",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "plist",
+ "serde",
+ "serde_json",
+ "sys-locale",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-store",
+ "window-vibrancy",
+]
+
+[[package]]
 name = "ndk"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3087,25 +3107,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spotlight"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "notify",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "plist",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-store",
- "window-vibrancy",
-]
-
-[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3202,6 +3203,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "sys-locale"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

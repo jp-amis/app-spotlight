@@ -2,20 +2,30 @@ import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  favoritesStatus,
   getFavorites,
+  getLoginItem,
   getSettings,
   grantFolder,
   indexedApps,
   indexStatus,
+  openKeyboardSettings,
+  purchaseFavorites,
+  quitApp,
   reindexNow,
   removeGrantedFolder,
+  restoreFavorites,
   setAppDisabled,
   setAppsDisabled,
   setFavorites as saveFavoritesApi,
+  setLoginItem as setLoginItemApi,
   setFolderDisabled,
   setSetting,
   setShortcut,
+  unlockFavoritesSession,
+  restartApp,
   type DirInfo,
+  type FavoritesStatus,
   type IndexedApp,
   type IndexStatus,
   type Settings as SettingsData,
@@ -23,6 +33,8 @@ import {
 import AppIcon from "../launcher/AppIcon";
 import { acceleratorToSymbols } from "../lib/accelerator";
 import ShortcutCapture from "./ShortcutCapture";
+import { initI18n, t } from "../lib/i18n";
+import { initFontScale } from "../lib/fontscale";
 
 type Tab = "general" | "favorites" | "index" | "help";
 
@@ -49,7 +61,62 @@ export default function Settings() {
   const [expandedDir, setExpandedDir] = createSignal<string | null>(null);
   const [favorites, setFavorites] = createSignal<string[]>([]);
   const [favFilter, setFavFilter] = createSignal("");
+  const [favStatus, setFavStatus] = createSignal<FavoritesStatus>();
+  const [loginItem, setLoginItem] = createSignal(false);
   const [error, setError] = createSignal("");
+  // Set if a language change couldn't be applied live to a native surface.
+  const [langNeedsRestart, setLangNeedsRestart] = createSignal(false);
+
+  const favUnlocked = () => favStatus()?.unlocked ?? false;
+  async function refreshFavStatus() {
+    try {
+      setFavStatus(await favoritesStatus());
+    } catch {
+      /* no backend */
+    }
+  }
+  // Free: unlock favorites for this session (until the app quits).
+  async function unlockSession() {
+    setError("");
+    try {
+      await unlockFavoritesSession();
+      await refreshFavStatus();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+  // Buy: unlock forever (StoreKit; unavailable outside the App Store build).
+  async function buyUnlock() {
+    setError("");
+    try {
+      await purchaseFavorites();
+      await refreshFavStatus();
+    } catch (e) {
+      if (String(e) !== "cancelled") setError(String(e));
+    }
+  }
+  async function restoreUnlock() {
+    setError("");
+    try {
+      const ok = await restoreFavorites();
+      await refreshFavStatus();
+      if (!ok) setError(t("fav.noPreviousPurchase"));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  // Toggle "open at login" (macOS SMAppService); optimistic, reverts on failure.
+  async function toggleLoginItem(v: boolean) {
+    setError("");
+    setLoginItem(v);
+    try {
+      await setLoginItemApi(v);
+    } catch (e) {
+      setLoginItem(!v);
+      setError(String(e));
+    }
+  }
 
   const MAX_FAVORITES = 10;
   const appByPath = (path: string) => allApps().find((a) => a.path === path);
@@ -245,11 +312,15 @@ export default function Settings() {
   }
 
   onMount(async () => {
+    void initI18n();
+    void initFontScale();
     // Start keyboard focus on the active tab so arrows/Tab work immediately.
     queueMicrotask(() => tabRefs[tab()]?.focus());
     try {
       setData(await getSettings());
       setFavorites(await getFavorites());
+      setLoginItem(await getLoginItem());
+      await refreshFavStatus();
       await refreshStatus();
       await refreshApps();
     } catch (e) {
@@ -268,10 +339,22 @@ export default function Settings() {
           /* ignore */
         }
       }),
+      listen("favorites:unlocked", () => void refreshFavStatus()),
+      // Reflect the raw language setting when it changes, and surface a restart
+      // hint if a native surface couldn't be re-localized live.
+      listen<{ needs_restart?: boolean }>("language:changed", async (e) => {
+        if (e.payload?.needs_restart) setLangNeedsRestart(true);
+        try {
+          setData(await getSettings());
+        } catch {
+          /* ignore */
+        }
+      }),
     ]);
     // ⌘Q closes this window (the app never quits from ⌘Q — same as ⌘W).
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey && e.code === "KeyQ") {
+      // ⌘Q closes this window; ⌘⇧Q (handled by the app menu) quits the app.
+      if (e.metaKey && !e.shiftKey && e.code === "KeyQ") {
         e.preventDefault();
         void getCurrentWindow().close();
       }
@@ -309,72 +392,87 @@ export default function Settings() {
         data-tauri-drag-region
         class="relative flex h-[28px] shrink-0 items-center justify-center"
       >
-        <span class="pointer-events-none text-[13px] font-semibold text-neutral-800 dark:text-neutral-100">
-          My App Spot Settings
+        <span class="pointer-events-none text-[0.8125rem] font-semibold text-neutral-800 dark:text-neutral-100">
+          {t("settings.title")}
         </span>
       </div>
 
       {/* tabs — fixed while the content scrolls, with a little breathing room up top */}
-      <div class="shrink-0 border-b border-black/10 px-10 pt-4 dark:border-white/10">
-        <div role="tablist" onKeyDown={onTabsKeyDown} class="mx-auto flex max-w-4xl gap-6">
+      <div class="shrink-0 border-b border-black/10 px-8 pt-4 dark:border-white/10">
+        <div role="tablist" onKeyDown={onTabsKeyDown} class="mx-auto flex max-w-[672px] gap-6">
           <TabButton
             active={tab() === "general"}
             onClick={() => setTab("general")}
             ref={(el) => (tabRefs.general = el)}
           >
-            General
+            {t("tab.general")}
           </TabButton>
           <TabButton
             active={tab() === "favorites"}
             onClick={() => setTab("favorites")}
             ref={(el) => (tabRefs.favorites = el)}
           >
-            Favorites
+            {t("tab.favorites")}
           </TabButton>
           <TabButton
             active={tab() === "index"}
             onClick={() => setTab("index")}
             ref={(el) => (tabRefs.index = el)}
           >
-            Index & Permissions
+            {t("tab.index")}
           </TabButton>
           <TabButton
             active={tab() === "help"}
             onClick={() => setTab("help")}
             ref={(el) => (tabRefs.help = el)}
           >
-            Shortcuts
+            {t("tab.shortcuts")}
           </TabButton>
         </div>
       </div>
 
       {/* scrollable content */}
-      <div class="flex-1 overflow-y-auto px-10 py-6">
-        <div class="mx-auto max-w-4xl">
-          <Show when={data()} fallback={<p class="text-sm text-neutral-500">Loading…</p>}>
+      <div class="flex-1 overflow-y-auto px-8 py-6">
+        <div class="mx-auto max-w-[672px]">
+          <Show when={data()} fallback={<p class="text-sm text-neutral-500">{t("settings.loading")}</p>}>
             {(d) => (
               <>
               {/* ---------- General tab ---------- */}
               <Show when={tab() === "general"}>
-                <div class="space-y-8">
-                  <Section title="Shortcut">
-                    <Field label="Global hotkey">
+                <div class="space-y-6">
+                  <Section
+                    title={t("section.shortcut")}
+                    footnote={
+                      <>
+                        {t("shortcut.want")} <Kbd>⌘</Kbd> <Kbd>{t("key.space")}</Kbd>
+                        {t("shortcut.reserved")}{" "}
+                        <button
+                          onClick={() => void openKeyboardSettings()}
+                          class="font-medium text-[var(--color-accent)] hover:underline"
+                        >
+                          {t("shortcut.openKeyboard")}
+                        </button>
+                        {t("shortcut.thenChoose")}
+                      </>
+                    }
+                  >
+                    <Field label={t("field.globalHotkey")}>
                       <ShortcutCapture value={d().shortcut} onChange={rebind} />
                     </Field>
-                    <p class="text-xs leading-relaxed text-neutral-500">
-                      Want <Kbd>⌘</Kbd> <Kbd>Space</Kbd>? macOS reserves it for Spotlight.
-                      Open System Settings → Keyboard → Keyboard Shortcuts → Spotlight and
-                      uncheck “Show Spotlight search”, then rebind here.
-                    </p>
                   </Section>
 
-                  <Section title="General">
+                  <Section title={t("section.general")}>
                     <Toggle
-                      label="Show menu-bar icon"
+                      label={t("toggle.openAtLogin")}
+                      checked={loginItem()}
+                      onChange={(v) => void toggleLoginItem(v)}
+                    />
+                    <Toggle
+                      label={t("toggle.menubar")}
                       checked={d().menubar_visible}
                       onChange={(v) => update("menubar_visible", v)}
                     />
-                    <Field label="Results shown">
+                    <Field label={t("field.resultsShown")}>
                       <input
                         type="number"
                         min="3"
@@ -388,44 +486,179 @@ export default function Settings() {
                     </Field>
                   </Section>
 
-                  <Section title="Appearance">
-                    <Field label="Theme">
-                      <select
+                  <Section title={t("section.appearance")}>
+                    <Field label={t("field.theme")}>
+                      <Segmented
                         value={d().theme}
-                        onChange={(e) =>
-                          update("theme", e.currentTarget.value as SettingsData["theme"])
-                        }
-                        class="rounded-lg border border-black/10 bg-white px-2 py-1 text-sm dark:border-white/10 dark:bg-neutral-800"
-                      >
-                        <option value="system">System</option>
-                        <option value="light">Light</option>
-                        <option value="dark">Dark</option>
-                      </select>
+                        onChange={(v) => update("theme", v)}
+                        options={[
+                          { value: "system", label: t("theme.system"), icon: <IconAuto /> },
+                          { value: "light", label: t("theme.light"), icon: <IconSun /> },
+                          { value: "dark", label: t("theme.dark"), icon: <IconMoon /> },
+                        ]}
+                      />
+                    </Field>
+                    <Field label={t("field.textSize")}>
+                      <Segmented
+                        value={d().font_scale ?? "normal"}
+                        onChange={(v) => update("font_scale", v)}
+                        options={[
+                          { value: "smaller", label: t("size.smaller") },
+                          { value: "normal", label: t("size.normal") },
+                          { value: "bigger", label: t("size.bigger") },
+                          { value: "extra_big", label: t("size.xbig") },
+                        ]}
+                      />
+                    </Field>
+                    <Field label={t("field.launcherStyle")} align="start">
+                      <div class="flex gap-3">
+                        <For
+                          each={
+                            [
+                              { value: "glass", label: t("style.glass"), overlay: "bg-white/25 backdrop-blur-sm border border-white/50" },
+                              { value: "glass_clear", label: t("style.clear"), overlay: "bg-white/10 border border-white/30" },
+                              { value: "vibrancy", label: t("style.frosted"), overlay: "bg-white/60 backdrop-blur-md border border-white/40" },
+                            ] as const
+                          }
+                        >
+                          {(o) => (
+                            <button
+                              role="radio"
+                              aria-checked={(d().launcher_style ?? "glass") === o.value}
+                              aria-label={o.label}
+                              onClick={() => update("launcher_style", o.value)}
+                              class="flex flex-col items-center gap-1.5"
+                            >
+                              <span
+                                class="relative h-12 w-[76px] overflow-hidden rounded-lg ring-2 transition"
+                                classList={{
+                                  "ring-[var(--color-accent)]":
+                                    (d().launcher_style ?? "glass") === o.value,
+                                  "ring-transparent": (d().launcher_style ?? "glass") !== o.value,
+                                }}
+                              >
+                                {/* mini wallpaper so translucency reads */}
+                                <span class="absolute inset-0 bg-gradient-to-br from-sky-400 via-violet-500 to-fuchsia-500" />
+                                {/* material overlay approximating each style */}
+                                <span class={`absolute inset-2 rounded-md ${o.overlay}`} />
+                              </span>
+                              <span
+                                class="text-xs"
+                                classList={{
+                                  "font-medium text-neutral-900 dark:text-neutral-100":
+                                    (d().launcher_style ?? "glass") === o.value,
+                                  "text-neutral-500":
+                                    (d().launcher_style ?? "glass") !== o.value,
+                                }}
+                              >
+                                {o.label}
+                              </span>
+                            </button>
+                          )}
+                        </For>
+                      </div>
+                    </Field>
+                    <Field label={t("field.language")}>
+                      <Segmented
+                        value={d().language ?? "system"}
+                        onChange={(v) => update("language", v)}
+                        options={[
+                          { value: "system", label: t("lang.system") },
+                          { value: "en-US", label: "English" },
+                          { value: "pt-BR", label: "Português" },
+                        ]}
+                      />
                     </Field>
                   </Section>
+
+                  <Show when={langNeedsRestart()}>
+                    <p class="flex items-center justify-center gap-2 text-xs text-neutral-500">
+                      {t("lang.restartNote")}{" "}
+                      <button
+                        onClick={() => void restartApp()}
+                        class="font-medium text-[var(--color-accent)] hover:underline"
+                      >
+                        {t("lang.restartNow")}
+                      </button>
+                    </p>
+                  </Show>
+
+                  <div class="flex justify-center pt-2">
+                    <button
+                      onClick={() => void quitApp()}
+                      class="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-500/20 dark:text-red-400"
+                    >
+                      {t("button.quit")}
+                    </button>
+                  </div>
                 </div>
               </Show>
 
               {/* ---------- Favorites tab ---------- */}
               <Show when={tab() === "favorites"}>
+                <Show
+                  when={favUnlocked()}
+                  fallback={
+                    <div class="mx-auto max-w-md space-y-5 py-8 text-center">
+                      <div class="text-4xl">★</div>
+                      <h2 class="text-lg font-semibold">{t("fav.unlockTitle")}</h2>
+                      <p class="text-sm leading-relaxed text-neutral-500">
+                        {t("fav.unlockDescA", { max: MAX_FAVORITES })}{" "}
+                        <Kbd>⌘</Kbd>
+                        <Kbd>1</Kbd> {t("common.to")} <Kbd>⌘</Kbd>
+                        <Kbd>0</Kbd> {t("fav.unlockDescB")}
+                      </p>
+                      <div class="flex flex-col items-center gap-3">
+                        <button
+                          onClick={() => void buyUnlock()}
+                          disabled={!favStatus()?.purchasable}
+                          class="w-full max-w-xs rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-40"
+                        >
+                          {favStatus()?.purchasable
+                            ? t("fav.unlockForeverPriced", { price: favStatus()?.price ?? "" })
+                            : t("fav.unlockForever")}
+                        </button>
+                        <button
+                          onClick={() => void restoreUnlock()}
+                          class="text-xs text-neutral-500 hover:underline"
+                        >
+                          {t("fav.restore")}
+                        </button>
+                      </div>
+                      <p class="text-xs leading-relaxed text-neutral-400">
+                        {t("fav.freePre")}{" "}
+                        <button
+                          onClick={() => void unlockSession()}
+                          class="font-semibold text-[var(--color-accent)] hover:underline"
+                        >
+                          {t("fav.freeLink")}
+                        </button>{" "}
+                        {t("fav.freePost")}
+                        <Show when={!favStatus()?.purchasable}>
+                          {" "}
+                          {t("fav.appStoreOnly")}
+                        </Show>
+                      </p>
+                    </div>
+                  }
+                >
                 <div class="space-y-6">
                   <p class="text-xs leading-relaxed text-neutral-500">
-                    Pinned apps appear at the top of the launcher — with <Kbd>⌘</Kbd>
-                    <Kbd>1</Kbd>…<Kbd>⌘</Kbd>
-                    <Kbd>0</Kbd> shortcuts — the moment you open it, before you type
-                    anything. Up to {MAX_FAVORITES}.
+                    {t("fav.introA")} <Kbd>⌘</Kbd>
+                    <Kbd>1</Kbd> {t("common.to")} <Kbd>⌘</Kbd>
+                    <Kbd>0</Kbd> {t("fav.introB", { max: MAX_FAVORITES })}
                   </p>
 
                   {/* pinned, ordered */}
                   <div class="space-y-2">
                     <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-                      Pinned ({favorites().length}/{MAX_FAVORITES})
+                      {t("fav.pinnedCount", { n: favorites().length, max: MAX_FAVORITES })}
                     </h2>
                     <Show
                       when={favorites().length > 0}
                       fallback={
                         <p class="text-xs text-neutral-400">
-                          No pinned apps yet — pin some from the list below.
+                          {t("fav.noPinned")}
                         </p>
                       }
                     >
@@ -459,7 +692,7 @@ export default function Settings() {
                               </Show>
                               <span
                                 onPointerDown={(e) => startDrag(i(), e)}
-                                aria-label="Drag to reorder"
+                                aria-label={t("fav.dragReorder")}
                                 class="cursor-grab touch-none select-none px-0.5 text-neutral-400 hover:text-neutral-700 active:cursor-grabbing dark:text-neutral-500 dark:hover:text-neutral-200"
                               >
                                 ⠿
@@ -474,7 +707,7 @@ export default function Settings() {
                               <button
                                 onClick={() => moveFavorite(i(), -1)}
                                 disabled={i() === 0}
-                                aria-label="Move up"
+                                aria-label={t("fav.moveUp")}
                                 class="px-1 text-neutral-400 hover:text-neutral-700 disabled:opacity-30 dark:hover:text-neutral-200"
                               >
                                 ↑
@@ -482,7 +715,7 @@ export default function Settings() {
                               <button
                                 onClick={() => moveFavorite(i(), 1)}
                                 disabled={i() === favorites().length - 1}
-                                aria-label="Move down"
+                                aria-label={t("fav.moveDown")}
                                 class="px-1 text-neutral-400 hover:text-neutral-700 disabled:opacity-30 dark:hover:text-neutral-200"
                               >
                                 ↓
@@ -491,7 +724,7 @@ export default function Settings() {
                                 onClick={() => unpinApp(path)}
                                 class="text-xs text-red-600 hover:underline"
                               >
-                                Unpin
+                                {t("fav.unpin")}
                               </button>
                             </li>
                           )}
@@ -503,22 +736,22 @@ export default function Settings() {
                   {/* suggestions to pin (most-opened first) */}
                   <div class="space-y-2">
                     <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-                      Add apps{" "}
+                      {t("fav.addApps")}{" "}
                       <Show when={favorites().length >= MAX_FAVORITES}>
-                        <span class="text-amber-600">(limit reached)</span>
+                        <span class="text-amber-600">{t("fav.limitReached")}</span>
                       </Show>
                     </h2>
                     <input
                       value={favFilter()}
                       onInput={(e) => setFavFilter(e.currentTarget.value)}
-                      placeholder="Search apps to pin…"
+                      placeholder={t("fav.searchToPin")}
                       class="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-neutral-800"
                     />
                     <ul class="max-h-96 space-y-0.5 overflow-y-auto rounded-lg border border-black/10 p-1 dark:border-white/10">
                       <For
                         each={favSuggestions()}
                         fallback={
-                          <li class="px-2 py-2 text-xs text-neutral-400">No apps</li>
+                          <li class="px-2 py-2 text-xs text-neutral-400">{t("fav.noApps")}</li>
                         }
                       >
                         {(app) => (
@@ -527,8 +760,8 @@ export default function Settings() {
                             <div class="min-w-0 flex-1">
                               <div class="truncate text-sm">{app.name}</div>
                               <Show when={opensOf(app.path) > 0}>
-                                <div class="text-[11px] text-neutral-400">
-                                  {opensOf(app.path)} opens
+                                <div class="text-[0.6875rem] text-neutral-400">
+                                  {t("fav.opens", { n: opensOf(app.path) })}
                                 </div>
                               </Show>
                             </div>
@@ -537,7 +770,7 @@ export default function Settings() {
                               disabled={favorites().length >= MAX_FAVORITES}
                               class="shrink-0 rounded-md border border-[var(--color-accent)] bg-[var(--color-accent)]/10 px-2 py-0.5 text-xs font-medium text-[var(--color-accent)] disabled:opacity-40"
                             >
-                              Pin
+                              {t("fav.pin")}
                             </button>
                           </li>
                         )}
@@ -545,6 +778,7 @@ export default function Settings() {
                     </ul>
                   </div>
                 </div>
+                </Show>
               </Show>
 
               {/* ---------- Index & Permissions tab ---------- */}
@@ -558,10 +792,10 @@ export default function Settings() {
                         fallback={
                           <>
                             <span class="font-medium">{enabledCount()}</span>
-                            <span class="text-neutral-400">of {total()} apps</span>
+                            <span class="text-neutral-400">{t("index.ofApps", { total: total() })}</span>
                             <Show when={disabledCount() > 0}>
                               <span class="text-xs text-amber-600">
-                                · {disabledCount()} off
+                                · {t("index.off", { n: disabledCount() })}
                               </span>
                             </Show>
                             <span class="text-xs text-neutral-400">
@@ -570,14 +804,14 @@ export default function Settings() {
                           </>
                         }
                       >
-                        <Spinner /> <span>Indexing…</span>
+                        <Spinner /> <span>{t("index.indexing")}</span>
                       </Show>
                     </span>
                     <button
                       onClick={() => void reindexNow()}
                       class="rounded-lg border border-black/10 px-3 py-1 text-xs font-medium hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
                     >
-                      Reindex
+                      {t("index.reindex")}
                     </button>
                   </div>
 
@@ -586,21 +820,20 @@ export default function Settings() {
                     <input
                       value={query()}
                       onInput={(e) => setQuery(e.currentTarget.value)}
-                      placeholder="Search apps…"
+                      placeholder={t("index.searchApps")}
                       class="min-w-0 flex-1 rounded-lg border border-black/10 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-neutral-800"
                     />
                     <button
                       onClick={() => void addFolder()}
                       class="shrink-0 rounded-lg border border-[var(--color-accent)] bg-[var(--color-accent)]/10 px-3 py-2 text-sm font-medium"
                     >
-                      Add Folder…
+                      {t("index.addFolder")}
                     </button>
                   </div>
 
                   <p class="text-xs leading-relaxed text-neutral-500">
-                    Sandboxed, so it always searches the system app folders; grant extra
-                    folders (like <code>~/Applications</code>). Turn a folder or app off to
-                    hide it from results (without removing it).
+                    {t("index.explainA")} <code>~/Applications</code>
+                    {t("index.explainB")}
                   </p>
 
                   {/* scanned locations — each expandable to its apps */}
@@ -617,7 +850,7 @@ export default function Settings() {
                               <input
                                 type="checkbox"
                                 checked={!dir.disabled}
-                                title={dir.disabled ? "Folder disabled" : "Folder enabled"}
+                                title={dir.disabled ? t("index.folderDisabled") : t("index.folderEnabled")}
                                 onChange={() => void toggleFolder(dir.path, dir.disabled)}
                                 class="h-4 w-4 shrink-0 accent-[var(--color-accent)]"
                               />
@@ -640,7 +873,7 @@ export default function Settings() {
                               </span>
                             </button>
                             <span
-                              class="shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
+                              class="shrink-0 rounded px-1.5 py-0.5 text-[0.625rem] uppercase tracking-wide"
                               classList={{
                                 "bg-black/10 text-neutral-500 dark:bg-white/10":
                                   dir.kind === "system",
@@ -648,15 +881,15 @@ export default function Settings() {
                                   dir.kind === "granted",
                               }}
                             >
-                              {dir.kind}
+                              {dir.kind === "system" ? t("index.kind.system") : t("index.kind.granted")}
                             </span>
                             <span class="shrink-0 text-xs text-neutral-400">
-                              {searching() ? appsInDir(dir.path).length : dir.count} apps
+                              {t("index.appsCount", { n: searching() ? appsInDir(dir.path).length : dir.count })}
                             </span>
                             <Show when={!dir.readable}>
                               <span
                                 class="shrink-0 text-xs text-amber-600"
-                                title="Not readable"
+                                title={t("index.notReadable")}
                               >
                                 ⚠
                               </span>
@@ -666,7 +899,7 @@ export default function Settings() {
                                 onClick={() => void removeFolder(dir.path)}
                                 class="shrink-0 text-xs text-red-600 hover:underline"
                               >
-                                Remove
+                                {t("index.remove")}
                               </button>
                             </Show>
                           </div>
@@ -674,18 +907,18 @@ export default function Settings() {
                             <div class="border-t border-black/10 dark:border-white/10">
                               {/* bulk check/uncheck all shown apps */}
                               <div class="flex items-center gap-3 px-3 py-1.5 text-xs text-neutral-400">
-                                <span>{appsInDir(dir.path).length} apps</span>
+                                <span>{t("index.appsCount", { n: appsInDir(dir.path).length })}</span>
                                 <button
                                   onClick={() => void toggleAllInDir(dir, false)}
                                   class="text-[var(--color-accent)] hover:underline"
                                 >
-                                  Check all
+                                  {t("index.checkAll")}
                                 </button>
                                 <button
                                   onClick={() => void toggleAllInDir(dir, true)}
                                   class="text-red-600 hover:underline"
                                 >
-                                  Uncheck all
+                                  {t("index.uncheckAll")}
                                 </button>
                               </div>
                               <ul class="max-h-[32rem] overflow-y-auto px-2 pb-2">
@@ -709,57 +942,61 @@ export default function Settings() {
 
               {/* ---------- Help tab ---------- */}
               <Show when={tab() === "help"}>
-                <div class="max-w-xl space-y-8">
-                  <Section title="Launcher shortcuts">
-                    <ShortcutRow label="Open / toggle launcher">
+                <div class="space-y-6">
+                  <Section title={t("section.launcherShortcuts")}>
+                    <ShortcutRow label={t("sc.openToggle")}>
                       <Kbd>{acceleratorToSymbols(d().shortcut)}</Kbd>
                     </ShortcutRow>
-                    <ShortcutRow label="Launch selected">
+                    <ShortcutRow label={t("sc.launchSelected")}>
                       <Kbd>↵</Kbd>
                     </ShortcutRow>
-                    <ShortcutRow label="Launch 1st–10th result">
+                    <ShortcutRow label={t("sc.launchNth")}>
                       <Kbd>⌘1</Kbd>
-                      <span class="text-neutral-400">…</span>
+                      <span class="text-neutral-400">{t("common.to")}</span>
                       <Kbd>⌘0</Kbd>
                     </ShortcutRow>
-                    <ShortcutRow label="Move selection">
+                    <ShortcutRow label={t("sc.moveSelection")}>
                       <Kbd>↑</Kbd>
                       <Kbd>↓</Kbd>
-                      <span class="text-neutral-400">or</span>
+                      <span class="text-neutral-400">{t("common.or")}</span>
                       <Kbd>⌃P</Kbd>
                       <Kbd>⌃N</Kbd>
                     </ShortcutRow>
-                    <ShortcutRow label="Clear query / close">
+                    <ShortcutRow label={t("sc.clearClose")}>
                       <Kbd>esc</Kbd>
                     </ShortcutRow>
-                    <ShortcutRow label="Re-center the launcher window">
+                    <ShortcutRow label={t("sc.recenter")}>
                       <Kbd>⌘</Kbd>
                       <Kbd>⇧</Kbd>
                       <Kbd>C</Kbd>
                     </ShortcutRow>
-                    <ShortcutRow label="Open settings">
+                    <ShortcutRow label={t("sc.openSettings")}>
                       <Kbd>⌘</Kbd>
                       <Kbd>;</Kbd>
                     </ShortcutRow>
-                    <ShortcutRow label="Pin / unpin selected app">
+                    <ShortcutRow label={t("sc.pinUnpin")}>
                       <Kbd>⌘</Kbd>
                       <Kbd>P</Kbd>
                     </ShortcutRow>
-                    <ShortcutRow label="Move pinned app up / down">
+                    <ShortcutRow label={t("sc.movePinned")}>
                       <Kbd>⌘</Kbd>
                       <Kbd>K</Kbd>
                       <span class="text-neutral-400">/</span>
                       <Kbd>⌘</Kbd>
                       <Kbd>J</Kbd>
+                      <span class="text-neutral-400">{t("common.or")}</span>
+                      <Kbd>⌘</Kbd>
+                      <Kbd>[</Kbd>
+                      <span class="text-neutral-400">/</span>
+                      <Kbd>⌘</Kbd>
+                      <Kbd>]</Kbd>
                     </ShortcutRow>
                   </Section>
 
-                  <Section title="Tips">
-                    <p class="text-xs leading-relaxed text-neutral-500">
-                      The launcher lives in the menu bar and opens on the screen your cursor
-                      is on, remembering a position per monitor. Drag it to reposition; press{" "}
-                      <Kbd>⌘</Kbd> <Kbd>⇧</Kbd> <Kbd>C</Kbd> while it's open to snap it back to
-                      the default spot.
+                  <Section title={t("section.tips")}>
+                    <p class="px-4 py-3 text-xs leading-relaxed text-neutral-500">
+                      {t("tips.bodyA")}{" "}
+                      <Kbd>⌘</Kbd> <Kbd>⇧</Kbd> <Kbd>C</Kbd> {t("tips.bodyB")}
                     </p>
                   </Section>
                 </div>
@@ -781,7 +1018,7 @@ export default function Settings() {
 
 function ShortcutRow(props: { label: string; children: any }) {
   return (
-    <div class="flex items-center justify-between gap-4">
+    <div class="flex items-center justify-between gap-4 px-4 py-2.5">
       <span class="text-sm">{props.label}</span>
       <span class="flex items-center gap-1">{props.children}</span>
     </div>
@@ -833,7 +1070,7 @@ function AppRow(props: { app: IndexedApp; onToggle: () => void }) {
       <input
         type="checkbox"
         checked={props.app.enabled}
-        title={props.app.enabled ? "Enabled" : "Disabled"}
+        title={props.app.enabled ? t("index.enabled") : t("index.disabled")}
         onChange={props.onToggle}
         class="h-4 w-4 shrink-0 accent-[var(--color-accent)]"
       />
@@ -842,7 +1079,7 @@ function AppRow(props: { app: IndexedApp; onToggle: () => void }) {
         <div class="truncate text-sm" classList={{ "line-through": !props.app.enabled }}>
           {props.app.name}
         </div>
-        <div class="truncate text-[11px] text-neutral-400" title={props.app.path}>
+        <div class="truncate text-[0.6875rem] text-neutral-400" title={props.app.path}>
           {props.app.bundle_id ? `${props.app.bundle_id} · ` : ""}
           {props.app.path}
         </div>
@@ -851,23 +1088,98 @@ function AppRow(props: { app: IndexedApp; onToggle: () => void }) {
   );
 }
 
-function Section(props: { title: string; children: any }) {
+function Section(props: { title?: string; footnote?: any; children: any }) {
   return (
     <section>
-      <h2 class="mb-3 text-xs font-semibold uppercase tracking-wide text-neutral-400">
-        {props.title}
-      </h2>
-      <div class="space-y-3">{props.children}</div>
+      <Show when={props.title}>
+        <h2 class="mb-2 px-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+          {props.title}
+        </h2>
+      </Show>
+      {/* Grouped card, like macOS System Settings: rounded, hairline row dividers. */}
+      <div class="divide-y divide-black/[0.06] overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/[0.06] dark:divide-white/[0.07] dark:bg-white/[0.04] dark:ring-white/10">
+        {props.children}
+      </div>
+      <Show when={props.footnote}>
+        <p class="mt-2 px-1 text-xs leading-relaxed text-neutral-500">{props.footnote}</p>
+      </Show>
     </section>
   );
 }
 
-function Field(props: { label: string; children: any }) {
+function Field(props: { label: string; children: any; align?: "center" | "start" }) {
   return (
-    <div class="flex items-center justify-between gap-4">
-      <span class="text-sm">{props.label}</span>
+    <div
+      class="flex justify-between gap-4 px-4 py-3"
+      classList={{
+        "items-center": (props.align ?? "center") === "center",
+        "items-start": props.align === "start",
+      }}
+    >
+      <span class="text-sm" classList={{ "pt-1": props.align === "start" }}>
+        {props.label}
+      </span>
       {props.children}
     </div>
+  );
+}
+
+/** A visual segmented control (radiogroup) — replaces a plain <select>. */
+function Segmented<T extends string>(props: {
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string; icon?: any }[];
+}) {
+  return (
+    <div
+      role="radiogroup"
+      class="inline-flex gap-0.5 rounded-xl bg-black/5 p-1 dark:bg-white/10"
+    >
+      <For each={props.options}>
+        {(o) => (
+          <button
+            role="radio"
+            aria-checked={props.value === o.value}
+            aria-label={o.label}
+            onClick={() => props.onChange(o.value)}
+            class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition"
+            classList={{
+              "bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-white":
+                props.value === o.value,
+              "text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200":
+                props.value !== o.value,
+            }}
+          >
+            {o.icon}
+            <span>{o.label}</span>
+          </button>
+        )}
+      </For>
+    </div>
+  );
+}
+
+function IconSun() {
+  return (
+    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4" />
+    </svg>
+  );
+}
+function IconMoon() {
+  return (
+    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+    </svg>
+  );
+}
+function IconAuto() {
+  return (
+    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none" />
+    </svg>
   );
 }
 
@@ -877,7 +1189,7 @@ function Toggle(props: {
   onChange: (v: boolean) => void;
 }) {
   return (
-    <label class="flex cursor-pointer items-center justify-between gap-4">
+    <label class="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
       <span class="text-sm">{props.label}</span>
       <input
         type="checkbox"
@@ -898,16 +1210,16 @@ function Spinner() {
 function lastUpdatedLabel(ms: number | null): string {
   if (!ms) return "";
   const secs = Math.max(0, Math.round((Date.now() - ms) / 1000));
-  if (secs < 5) return "· updated just now";
-  if (secs < 60) return `· updated ${secs}s ago`;
+  if (secs < 5) return t("index.updatedNow");
+  if (secs < 60) return t("index.updatedSecs", { n: secs });
   const mins = Math.round(secs / 60);
-  if (mins < 60) return `· updated ${mins}m ago`;
-  return `· updated ${Math.round(mins / 60)}h ago`;
+  if (mins < 60) return t("index.updatedMins", { n: mins });
+  return t("index.updatedHours", { n: Math.round(mins / 60) });
 }
 
 function Kbd(props: { children: any }) {
   return (
-    <kbd class="rounded border border-black/15 bg-white px-1.5 py-0.5 text-[11px] dark:border-white/15 dark:bg-neutral-800">
+    <kbd class="rounded border border-black/15 bg-white px-1.5 py-0.5 text-[0.6875rem] dark:border-white/15 dark:bg-neutral-800">
       {props.children}
     </kbd>
   );

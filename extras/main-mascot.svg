@@ -1,0 +1,378 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="1024"
+   height="880"
+   viewBox="0 0 1024 880"
+   version="1.1"
+   id="svg24"
+   sodipodi:docname="main-mascot.svg"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview24"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="1.71875"
+     inkscape:cx="495.41818"
+     inkscape:cy="525.09091"
+     inkscape:window-width="3840"
+     inkscape:window-height="2102"
+     inkscape:window-x="2560"
+     inkscape:window-y="606"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="svg24" />
+  <!-- ===================================================================
+       App icon — "spotlight buddy": a glowing cone-of-light character with a
+       face and little legs, holding a magnifier. Brand indigo background.
+       Edit in Inkscape, then: mise run make-icons
+       =================================================================== -->
+  <defs
+     id="defs8">
+    <linearGradient
+       id="bg"
+       x1="0"
+       y1="0"
+       x2="0"
+       y2="1">
+      <stop
+         offset="0"
+         stop-color="#6D5EF7"
+         id="stop1" />
+      <stop
+         offset="1"
+         stop-color="#4A2FD0"
+         id="stop2" />
+    </linearGradient>
+    <radialGradient
+       id="sheen"
+       cx="0.5"
+       cy="0.079999998"
+       r="0.94999999">
+      <stop
+         offset="0"
+         stop-color="#ffffff"
+         stop-opacity="0.22"
+         id="stop3" />
+      <stop
+         offset="0.6"
+         stop-color="#ffffff"
+         stop-opacity="0"
+         id="stop4" />
+    </radialGradient>
+    <linearGradient
+       id="bodyfill"
+       x1="264.84641"
+       y1="237.42023"
+       x2="398.51089"
+       y2="682.96851"
+       gradientTransform="matrix(1.0458946,0,0,0.95611929,-69.818182,101.23636)"
+       gradientUnits="userSpaceOnUse">
+      <stop
+         offset="0"
+         stop-color="#ffffff"
+         id="stop5" />
+      <stop
+         offset="1"
+         stop-color="#ECE7FF"
+         id="stop6" />
+    </linearGradient>
+    <linearGradient
+       id="lens"
+       x1="766"
+       y1="332"
+       x2="766"
+       y2="476"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(0.59691033,0,0,0.59691033,280.45889,182.36718)">
+      <stop
+         offset="0"
+         stop-color="#FFF4C2"
+         id="stop7" />
+      <stop
+         offset="1"
+         stop-color="#FFD64A"
+         id="stop8" />
+    </linearGradient>
+    <filter
+       id="glow"
+       x="-0.12571429"
+       y="-0.13894737"
+       width="1.2514286"
+       height="1.2778947">
+      <feGaussianBlur
+         stdDeviation="22"
+         id="feGaussianBlur8" />
+    </filter>
+    <linearGradient
+       id="lens-3"
+       x1="766"
+       y1="332"
+       x2="766"
+       y2="476"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(0.44698779,0,0,0.44698779,415.99155,63.561846)">
+      <stop
+         offset="0"
+         stop-color="#FFF4C2"
+         id="stop7-9"
+         style="stop-color:#ffffff;stop-opacity:1;" />
+      <stop
+         offset="1"
+         stop-color="#FFD64A"
+         id="stop8-0"
+         style="stop-color:#ffffff;stop-opacity:0.21859297;" />
+    </linearGradient>
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#bodyfill"
+       id="linearGradient2"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(1.0458946,0,0,0.95611929,-69.818182,101.23636)"
+       x1="264.84641"
+       y1="237.42023"
+       x2="398.51089"
+       y2="682.96851" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#bodyfill"
+       id="linearGradient3"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(1.0458946,0,0,0.95611929,-69.818182,101.23636)"
+       x1="264.84641"
+       y1="237.42023"
+       x2="398.51089"
+       y2="682.96851" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#bodyfill"
+       id="linearGradient4"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(1.0458946,0,0,0.95611929,-69.818182,101.23636)"
+       x1="264.84641"
+       y1="237.42023"
+       x2="398.51089"
+       y2="682.96851" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#bodyfill"
+       id="linearGradient5"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(1.0458946,0,0,0.95611929,-69.818182,101.23636)"
+       x1="264.84641"
+       y1="237.42023"
+       x2="398.51089"
+       y2="682.96851" />
+  </defs>
+  <!-- background -->
+  <!-- ground shadow -->
+  <!-- light rays around the top, so it clearly reads as a LIGHT -->
+  <!-- soft glow halo so the body looks luminous -->
+  <!-- limbs (behind body) -->
+  <!-- body (cone of light) -->
+  <path
+     d="m 425.09091,300.61818 -160,380 420,-70 z"
+     fill="url(#bodyfill)"
+     stroke="url(#bodyfill)"
+     stroke-width="46"
+     stroke-linejoin="round"
+     id="path17"
+     style="display:none;fill:url(#linearGradient4);stroke:url(#linearGradient5)" />
+  <!-- clean centered hat tip + pom -->
+  <!-- face -->
+  <g
+     id="g2"
+     transform="matrix(1.532001,0,0,1.532001,-300.41147,-365.29382)">
+    <g
+       id="g27"
+       transform="matrix(1.1737469,-0.43863067,0.43863067,1.1737469,-191.42325,76.462143)"
+       style="display:inline">
+      <line
+         x1="604.28949"
+         y1="544.77692"
+         x2="578.81781"
+         y2="559.30713"
+         stroke="#241b3a"
+         stroke-width="13.4096"
+         stroke-linecap="round"
+         id="line20-2"
+         style="display:inline" />
+      <circle
+         cx="790.56726"
+         cy="244.14493"
+         fill="url(#lens)"
+         id="circle21-2"
+         style="fill:url(#lens-3);stroke-width:0.446988"
+         r="32.183121"
+         transform="rotate(22.729053)" />
+      <circle
+         cx="790.56726"
+         cy="244.14493"
+         fill="none"
+         stroke="#241b3a"
+         stroke-width="9.83371"
+         id="circle22-7"
+         r="32.183121"
+         transform="rotate(22.729053)"
+         style="display:inline" />
+      <path
+         d="m 626.61912,515.5639 q 7.36517,-3.69939 16.43523,0.1001"
+         fill="none"
+         stroke="#ffffff"
+         stroke-width="4.91686"
+         stroke-linecap="round"
+         opacity="0.85"
+         id="path22-3"
+         style="display:inline" />
+      <g
+         stroke="#ffd64a"
+         stroke-width="13"
+         stroke-linecap="round"
+         id="g24-7"
+         transform="matrix(0.59691033,0,0,0.59691033,280.4589,182.36718)">
+        <line
+           x1="665.92029"
+           y1="555.14795"
+           x2="688.50732"
+           y2="551.61963"
+           id="line22-9"
+           style="fill:#55ff99;stroke:#ffffff;stroke-width:9.73507;stroke-dasharray:none;stroke-opacity:1" />
+        <line
+           x1="669.26038"
+           y1="599.58966"
+           x2="689.66772"
+           y2="610.00146"
+           id="line23-0"
+           style="fill:#55ff99;stroke:#ffffff;stroke-width:9.73507;stroke-dasharray:none;stroke-opacity:1" />
+        <line
+           x1="641.30731"
+           y1="524.2804"
+           x2="648.23474"
+           y2="503.28067"
+           id="line24-2"
+           style="fill:#55ff99;stroke:#ffffff;stroke-width:9.73507;stroke-dasharray:none;stroke-opacity:1" />
+      </g>
+    </g>
+    <g
+       id="g1">
+      <ellipse
+         cx="448.39999"
+         cy="762.43634"
+         rx="205"
+         ry="34"
+         fill="#2a1a7a"
+         opacity="0.4"
+         id="ellipse9" />
+      <path
+         d="m 425.09091,300.61818 -160,380 420,-70 z"
+         fill="#ffffff"
+         opacity="0.45"
+         filter="url(#glow)"
+         id="path13" />
+      <g
+         fill="none"
+         stroke="#241b3a"
+         stroke-width="22"
+         stroke-linecap="round"
+         id="g16"
+         transform="translate(-34.909091,50.618182)">
+        <path
+           d="m 352,560 q -72,25 -102,72"
+           id="path14" />
+        <path
+           d="m 646.30909,526.23637 q 72,-25 102,-72"
+           id="path14-6" />
+        <path
+           d="m 432,616 -30,90"
+           id="path15" />
+        <path
+           d="m 520,600 36,88"
+           id="path16" />
+      </g>
+      <g
+         fill="#241b3a"
+         id="g17"
+         transform="translate(-34.909091,50.618182)">
+        <ellipse
+           cx="392"
+           cy="712"
+           rx="30"
+           ry="16"
+           id="ellipse16" />
+        <ellipse
+           cx="566"
+           cy="694"
+           rx="30"
+           ry="16"
+           id="ellipse17" />
+        <circle
+           cx="248"
+           cy="636"
+           r="17"
+           id="circle17" />
+        <circle
+           cx="758.49091"
+           cy="440.40002"
+           r="17"
+           id="circle17-1"
+           inkscape:transform-center-x="408.43636"
+           inkscape:transform-center-y="92.509091" />
+      </g>
+      <path
+         d="m 425.09091,300.61818 -160,380 420,-70 z"
+         fill="url(#bodyfill)"
+         stroke="url(#bodyfill)"
+         stroke-width="46"
+         stroke-linejoin="round"
+         id="path25"
+         style="fill:url(#linearGradient2);stroke:url(#linearGradient3)" />
+      <path
+         d="m 418.94546,255.23636 -47.23636,112.8 123.63636,-19.50909 z"
+         fill="#241b3a"
+         id="path18"
+         sodipodi:nodetypes="cccc" />
+      <circle
+         cx="421.47311"
+         cy="261.44229"
+         r="23"
+         fill="#241b3a"
+         id="circle18" />
+      <g
+         fill="#241b3a"
+         id="g19"
+         transform="translate(-34.909091,50.618182)">
+        <ellipse
+           cx="452"
+           cy="470"
+           rx="15"
+           ry="24"
+           id="ellipse18" />
+        <ellipse
+           cx="536"
+           cy="466"
+           rx="15"
+           ry="24"
+           id="ellipse19" />
+      </g>
+      <path
+         d="m 435.09091,558.61818 q 25,26 52,-2"
+         fill="none"
+         stroke="#241b3a"
+         stroke-width="11"
+         stroke-linecap="round"
+         id="path19" />
+    </g>
+  </g>
+  <!-- right arm ending in a fist that grips the magnifier handle -->
+  <!-- magnifier -->
+  <!-- fist -->
+  <!-- sparkles -->
+</svg>

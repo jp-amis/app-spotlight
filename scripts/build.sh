@@ -21,7 +21,8 @@ if [ -f .env.mas ]; then
 { "identifier": "$BUNDLE_ID", "bundle": { "macOS": { $FILES } } }
 EOF
   echo "building with identifier=$BUNDLE_ID"
-  pnpm tauri build --target universal-apple-darwin --config "$OVERRIDE"
+  # App Store build → include real StoreKit IAP (see docs/iap.md). Needs swiftc.
+  pnpm tauri build --target universal-apple-darwin --features storekit --config "$OVERRIDE"
 else
   echo "no .env.mas — plain unsigned universal build."
   echo "  (cp .env.mas.example .env.mas to configure Mac App Store signing)"

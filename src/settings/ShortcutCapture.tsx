@@ -1,16 +1,21 @@
 import { createSignal } from "solid-js";
 import { acceleratorToSymbols, eventToAccelerator } from "../lib/accelerator";
 import { resumeShortcut, suspendShortcut } from "../lib/api";
+import { t } from "../lib/i18n";
 
 export default function ShortcutCapture(props: {
   value: string;
   onChange: (accelerator: string) => void;
 }) {
   const [capturing, setCapturing] = createSignal(false);
+  let el: HTMLButtonElement | undefined;
 
   function start() {
     if (capturing()) return;
     setCapturing(true);
+    // WKWebView doesn't focus <button>s on click, so keydowns would otherwise land
+    // on whatever had focus (e.g. the active tab). Focus ourselves so we get them.
+    el?.focus();
     // Suspend the global shortcut so the combo reaches us instead of firing the launcher.
     void suspendShortcut();
   }
@@ -47,6 +52,7 @@ export default function ShortcutCapture(props: {
 
   return (
     <button
+      ref={el}
       type="button"
       onClick={start}
       onKeyDown={onKeyDown}
@@ -58,7 +64,7 @@ export default function ShortcutCapture(props: {
           !capturing(),
       }}
     >
-      {capturing() ? "Press keys…" : acceleratorToSymbols(props.value)}
+      {capturing() ? t("shortcut.pressKeys") : acceleratorToSymbols(props.value)}
     </button>
   );
 }

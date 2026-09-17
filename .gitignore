@@ -10,6 +10,7 @@ src-tauri/target
 .env
 .env.local
 .env.mas
+.env.dist
 # generated MAS build files
 src-tauri/tauri.mas.conf.json
 src-tauri/entitlements.generated.plist

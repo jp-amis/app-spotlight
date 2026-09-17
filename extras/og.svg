@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6d5ef7"/>
+      <stop offset="1" stop-color="#3e2abf"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <g font-family="SF Pro Display, Helvetica Neue, Helvetica, Arial, sans-serif">
+    <text x="64" y="118" fill="#ffffff" fill-opacity="0.85"
+          font-size="26" font-weight="700" letter-spacing="4">MY APP SPOT</text>
+    <text x="60" y="238" fill="#ffffff" font-size="76" font-weight="800"
+          letter-spacing="-1.5">Open any app</text>
+    <text x="60" y="322" fill="#ffffff" font-size="76" font-weight="800"
+          letter-spacing="-1.5">in a keystroke</text>
+    <text x="64" y="404" fill="#ffffff" fill-opacity="0.9"
+          font-size="27" font-weight="500">A fast, private, keyboard-first app launcher for Mac.</text>
+  </g>
+</svg>

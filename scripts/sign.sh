@@ -9,6 +9,12 @@ cd "$(dirname "$0")/.."
 APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/My App Spot.app"
 [ -d "$APP" ] || { echo "build first: mise run build ($APP not found)"; exit 1; }
 
+# Strip extended attributes before signing. The provisioning profile (downloaded
+# from developer.apple.com) carries com.apple.quarantine, and App Store Connect
+# rejects any bundle containing it (error 91109). Must run BEFORE codesign so the
+# signature seals the cleaned bundle.
+xattr -cr "$APP"
+
 # Generate concrete entitlements from the template (git-ignored output).
 GEN="src-tauri/entitlements.generated.plist"
 sed -e "s/__TEAM_ID__/${TEAM_ID}/g" \

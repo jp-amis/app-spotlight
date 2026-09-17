@@ -14,9 +14,33 @@ run = "./scripts/build.sh"
 description = "Build + codesign (ad-hoc or $APPLE_DEV_IDENTITY) + run locally, sandboxed"
 run = "./scripts/sandbox-run.sh"
 
+[tasks.clean-data]
+description = "Wipe local app data (sandbox container) for a fresh-install test"
+run = "./scripts/clean-data.sh"
+
 [tasks.release]
-description = "Full MAS pipeline: build -> sign -> pkg (requires .env.mas)"
-run = ["./scripts/build.sh", "./scripts/sign.sh", "./scripts/pkg.sh"]
+description = "Full MAS pipeline: build -> bump build# -> sign -> pkg (requires .env.mas)"
+run = ["./scripts/build.sh", "./scripts/bump-build.sh", "./scripts/sign.sh", "./scripts/pkg.sh"]
+
+[tasks.dist]
+description = "Developer ID: build + sign + notarize a universal .dmg to send to testers (needs .env.dist)"
+run = "./scripts/dist.sh"
+
+[tasks.make-icons]
+description = "Rasterize assets/*.svg into the app icon set + menu-bar template icon"
+run = "./scripts/make-icons.sh"
+
+[tasks.icon-preview]
+description = "Open a montage of the shipped app icon at every macOS size (true pixel size)"
+run = "./scripts/icon-preview.sh"
+
+[tasks.mascots]
+description = "Re-export extras/*.svg mascots into site/assets (hero + CTA)"
+run = "./scripts/mascots.sh"
+
+[tasks.screenshots]
+description = "Generate App Store marketing screenshots (mocks, or real captures in assets/store/captures/)"
+run = "python3 ./scripts/gen-store-screenshots.py"
 
 [tasks.icon]
 description = "Generate .icns + png set from a 1024 png: mise run icon -- path/to/icon-1024.png"

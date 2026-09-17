@@ -1,14 +1,20 @@
 [package]
-name = "spotlight"
-version = "0.1.0"
+name = "myappspot"
+version = "1.0.0"
 description = "A fast, keyboard-first app launcher for macOS"
 authors = ["jp"]
 edition = "2021"
 rust-version = "1.77"
 
 [lib]
-name = "spotlight_lib"
+name = "myappspot_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# Enable real StoreKit in-app purchase (Mac App Store builds only). OFF by default
+# so the standard / `mise run sandbox` build never depends on Swift/StoreKit.
+# Build with: pnpm tauri build --features storekit
+storekit = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -22,12 +28,13 @@ serde_json = "1"
 plist = "1"
 base64 = "0.22"
 notify = "6"
+sys-locale = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 window-vibrancy = "0.6"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString", "NSURL", "NSData", "NSDictionary", "NSArray", "NSThread", "NSGeometry"] }
-objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSImage", "NSBitmapImageRep", "NSImageRep", "NSGraphics", "NSGraphicsContext", "NSWindow", "NSResponder", "NSView", "NSScreen", "NSApplication", "NSOpenPanel", "NSSavePanel", "NSPanel"] }
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSImage", "NSBitmapImageRep", "NSImageRep", "NSGraphics", "NSGraphicsContext", "NSWindow", "NSResponder", "NSView", "NSScreen", "NSApplication", "NSOpenPanel", "NSSavePanel", "NSPanel", "NSGlassEffectView", "NSColor"] }
 
 [profile.release]
 codegen-units = 1
