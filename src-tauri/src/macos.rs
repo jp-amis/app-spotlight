@@ -15,7 +15,9 @@ use objc2_app_kit::{
     NSWindowCollectionBehavior, NSWindowOrderingMode, NSWorkspace,
 };
 use window_vibrancy::NSVisualEffectMaterial;
-use objc2_foundation::{NSDictionary, NSPoint, NSRect, NSSize, NSString, NSURL};
+use objc2_foundation::{
+    NSBundle, NSDictionary, NSPoint, NSProcessInfo, NSRect, NSSize, NSString, NSURL,
+};
 
 /// Extract an app icon and render it to a `size`x`size` PNG.
 ///
@@ -64,6 +66,14 @@ pub fn launch(path: &str) -> bool {
     let url = NSURL::fileURLWithPath(&NSString::from_str(path));
     #[allow(deprecated)]
     ws.openURL(&url)
+}
+
+/// Reveal a file in Finder (selects it in its containing folder). Returns true on success.
+pub fn reveal_in_finder(path: &str) -> bool {
+    let ws = NSWorkspace::sharedWorkspace();
+    let p = NSString::from_str(path);
+    let root = NSString::from_str("");
+    ws.selectFile_inFileViewerRootedAtPath(Some(&p), &root)
 }
 
 /// Bring the app to the front. Menu-bar (accessory) apps don't activate when a
@@ -192,6 +202,60 @@ pub fn apply_liquid_glass(ns_window: *mut c_void, radius: f64, clear: bool) -> b
 /// Clip the launcher's content view to a rounded rectangle. Regular Liquid Glass
 /// draws a bright specular rim at its edge that reads as a hard border; clipping
 /// the container to the same radius trims that rim. MUST run on the main thread.
+/// The app's `CFBundleVersion` (the App Store build number, set post-build by
+/// scripts/bump-build.sh). `None` when unbundled (e.g. `cargo run`, where there's no
+/// Info.plist entry).
+pub fn bundle_build_number() -> Option<String> {
+    let bundle = NSBundle::mainBundle();
+    let key = NSString::from_str("CFBundleVersion");
+    let obj: *mut AnyObject = unsafe { msg_send![&bundle, objectForInfoDictionaryKey: &*key] };
+    if obj.is_null() {
+        return None;
+    }
+    let s: &NSString = unsafe { &*(obj as *const NSString) };
+    Some(s.to_string())
+}
+
+/// Prevent App Nap so the app — and its hidden launcher webview — isn't suspended while it
+/// sits idle in the menu bar (which is what lets macOS throttle/kill the WebContent process,
+/// causing the "empty then reloads" flash on reopen). Begins a process activity and
+/// intentionally never ends it (the token is leaked) so it lasts the whole process lifetime.
+/// Call once at startup. Uses `NSActivityUserInitiated` — blocks nap + automatic termination
+/// without keeping the display or system awake.
+pub fn prevent_app_nap() {
+    const NS_ACTIVITY_USER_INITIATED: usize = 0x00FF_FFFF;
+    let pi = NSProcessInfo::processInfo();
+    let reason = NSString::from_str("keep launcher webview warm (no App Nap)");
+    // The returned activity token must be retained for the activity to stay in effect; leak
+    // it so the activity persists for the app's lifetime.
+    let token: Retained<AnyObject> = unsafe {
+        msg_send![&pi, beginActivityWithOptions: NS_ACTIVITY_USER_INITIATED, reason: &*reason]
+    };
+    std::mem::forget(token);
+}
+
+/// Resize the launcher to `height` points while keeping its TOP-left corner fixed, so the
+/// window grows/shrinks downward (Spotlight-like) instead of AppKit's default bottom-left
+/// anchoring. A single atomic `setFrame:` — no transient reposition. Width is unchanged.
+/// MUST run on the main thread.
+pub fn set_launcher_height_keep_top(ns_window: *mut c_void, height: f64) {
+    if ns_window.is_null() {
+        return;
+    }
+    let window: &NSWindow = unsafe { &*(ns_window as *const NSWindow) };
+    let old: NSRect = unsafe { msg_send![window, frame] };
+    // Cocoa frames use a bottom-left origin (y up): the top edge sits at origin.y + height.
+    // Keep that top edge constant while changing the height.
+    let top = old.origin.y + old.size.height;
+    let frame = NSRect::new(
+        NSPoint::new(old.origin.x, top - height),
+        NSSize::new(old.size.width, height),
+    );
+    unsafe {
+        let _: () = msg_send![window, setFrame: frame, display: true];
+    }
+}
+
 pub fn round_launcher_content(ns_window: *mut c_void, radius: f64) {
     if ns_window.is_null() {
         return;

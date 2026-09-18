@@ -38,6 +38,10 @@ run = "./scripts/icon-preview.sh"
 description = "Re-export extras/*.svg mascots into site/assets (hero + CTA)"
 run = "./scripts/mascots.sh"
 
+[tasks.iap-image]
+description = "Rasterize assets/store/iap-favorites.svg into a 1024x1024 no-alpha PNG for the IAP store listing"
+run = "rsvg-convert -w 1024 -h 1024 assets/store/iap-favorites.svg -o assets/store/iap-favorites.png"
+
 [tasks.screenshots]
 description = "Generate App Store marketing screenshots (mocks, or real captures in assets/store/captures/)"
 run = "python3 ./scripts/gen-store-screenshots.py"

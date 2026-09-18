@@ -8,10 +8,10 @@ import {
   Show,
 } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { rank, type AppEntry, type Frecency } from "../lib/fuzzy";
 import {
   accessStatus,
+  devLog,
   favoritesStatus,
   getFavorites,
   getSettings,
@@ -22,16 +22,14 @@ import {
   listApps,
   openSettings,
   recenterLauncher,
+  resizeLauncher,
   setFavorites as saveFavoritesApi,
-  setLauncherHeight,
 } from "../lib/api";
 import AppIcon from "./AppIcon";
 import { initI18n, t } from "../lib/i18n";
 import { fontScale, initFontScale } from "../lib/fontscale";
 
 const BANNER_DISMISS_KEY = "accessBannerDismissed";
-
-const WINDOW_WIDTH = 680;
 
 export default function Launcher() {
   const [apps, setApps] = createSignal<AppEntry[]>([]);
@@ -102,17 +100,17 @@ export default function Launcher() {
 
   // Resize the window to fit its content so the last row is never clipped
   // (the results list scrolls past its max-height).
-  let lastPersistedHeight = 0;
+  let lastAppliedHeight = 0;
   function syncWindowHeight() {
     if (!rootEl) return;
     const h = Math.ceil(rootEl.getBoundingClientRect().height);
-    if (h < 60) return;
-    void getCurrentWindow().setSize(new LogicalSize(WINDOW_WIDTH, h)).catch(() => {});
-    // Persist so the next launch pre-sizes the window (no first-open resize blink).
-    if (Math.abs(h - lastPersistedHeight) >= 1) {
-      lastPersistedHeight = h;
-      void setLauncherHeight(h);
-    }
+    if (h < 60 || h === lastAppliedHeight) return;
+    lastAppliedHeight = h;
+    // Resize natively with the top-left pinned (grows downward, no anchor shift). Persist
+    // only the EMPTY-query height — that's the size the launcher reopens at, so it's what
+    // the backend should pre-size to on the next show. Persisting a shrunken search height
+    // instead would make it open small and resize after show (the reopen blink).
+    void resizeLauncher(h, query().trim().length === 0);
   }
 
   createEffect(() => {
@@ -167,6 +165,20 @@ export default function Launcher() {
     void refreshIndexing();
     focusInput();
 
+    // Diagnostic (#5): each webview (re)mount bumps a persisted counter. If this climbs
+    // while the app just sits idle, the launcher's WKWebView was reloaded from scratch
+    // (content-process purge) — the cause of the "empty then repositioned" flash. No-op
+    // unless dev logging is enabled in Settings → Developer.
+    const mountCount = Number(localStorage.getItem("launcherMountCount") ?? "0") + 1;
+    localStorage.setItem("launcherMountCount", String(mountCount));
+    void devLog(`launcher mounted (lifetime #${mountCount})`);
+
+    // Backend fires this right after the window hides — clear the query/selection now, so
+    // the next open is already blank instead of flashing the previous search.
+    const unHidden = listen("launcher:hidden", () => {
+      setQuery("");
+      setSelected(0);
+    });
     // Backend fires this each time the window is shown via the global shortcut.
     const un = listen("launcher:opened", () => {
       setQuery("");
@@ -191,6 +203,7 @@ export default function Launcher() {
       void refreshApps();
     });
     onCleanup(() => {
+      void unHidden.then((f) => f());
       void un.then((f) => f());
       void un2.then((f) => f());
       void un3.then((f) => f());

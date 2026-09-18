@@ -60,9 +60,6 @@ mod backend {
             String::from_utf8(buf[..n.min(buf.len())].to_vec()).ok()
         }
     }
-    pub fn purchasable() -> bool {
-        price().is_some()
-    }
     pub fn is_purchased() -> bool {
         unsafe { myappspot_iap_is_purchased() }
     }
@@ -91,9 +88,6 @@ mod backend {
 
     pub fn price() -> Option<String> {
         None
-    }
-    pub fn purchasable() -> bool {
-        false
     }
     pub fn is_purchased() -> bool {
         false

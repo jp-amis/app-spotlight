@@ -28,7 +28,8 @@
         "shadow": true,
         "focus": true,
         "acceptFirstMouse": true,
-        "devtools": false
+        "devtools": false,
+        "backgroundThrottling": "disabled"
       }
     ],
     "security": {

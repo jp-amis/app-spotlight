@@ -182,14 +182,17 @@ fn icon_data_uri<R: Runtime>(_app: &AppHandle<R>, _path: &str) -> Option<String>
 
 #[tauri::command]
 pub fn launch_app<R: Runtime>(app: AppHandle<R>, path: String) -> Result<(), String> {
-    record_frecency(&app, &path);
-    let _ = hide_launcher(app);
-    #[cfg(target_os = "macos")]
-    {
+    // Close Spotlight first so it vanishes the instant Enter is pressed, then do the
+    // frecency write + actual launch off-thread. Returns immediately (fire-and-forget);
+    // a launch failure is logged rather than surfaced, since the window is already gone.
+    let _ = hide_launcher(app.clone());
+    std::thread::spawn(move || {
+        record_frecency(&app, &path);
+        #[cfg(target_os = "macos")]
         if !crate::macos::launch(&path) {
-            return Err(format!("failed to launch {path}"));
+            eprintln!("failed to launch {path}");
         }
-    }
+    });
     Ok(())
 }
 
@@ -283,12 +286,31 @@ const LAUNCHER_POS_KEY: &str = "launcher_pos";
 pub fn hide_launcher<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("launcher") {
         // Remember where the user left it, keyed by the monitor it's on.
+        log_launcher_geometry(&app, "hide:before", &win);
         if let (Ok(p), Some(m)) = (win.outer_position(), window_monitor(&win)) {
             save_pos_for_monitor(&app, LAUNCHER_POS_KEY, &monitor_key(&m), p.x, p.y);
         }
         win.hide().map_err(|e| e.to_string())?;
+        // Tell the frontend to clear its query/selection now (while hidden), so the next
+        // open is already blank instead of flashing the previous search for a frame.
+        let _ = app.emit("launcher:hidden", ());
     }
     Ok(())
+}
+
+/// Dev-log the launcher's current geometry (no-op unless dev logging is on). Used to trace
+/// the show/hide/resize sequence when diagnosing reposition/blink issues.
+fn log_launcher_geometry<R: Runtime>(app: &AppHandle<R>, tag: &str, win: &tauri::WebviewWindow<R>) {
+    if !dev_logging_enabled(app) {
+        return;
+    }
+    let pos = win.outer_position().ok().map(|p| (p.x, p.y));
+    let size = win.outer_size().ok().map(|s| (s.width, s.height));
+    let vis = win.is_visible().unwrap_or(false);
+    dev_log_line(
+        app,
+        &format!("launcher {tag}: pos={pos:?} size={size:?} visible={vis}"),
+    );
 }
 
 /// Hidden ⌘⇧C command: re-center the (open) launcher to the default upper third of the
@@ -365,6 +387,34 @@ pub fn set_launcher_height<R: Runtime>(app: AppHandle<R>, height: f64) -> Result
     Ok(())
 }
 
+/// Resize the launcher to fit its content, keeping the TOP-left corner fixed so it grows
+/// downward instead of AppKit's default bottom-left anchoring (which would push the top edge
+/// up — the reposition/blink). When `persist` is set (empty-query height), also store it so
+/// the next open can pre-size to it. Runs the resize atomically on the main thread.
+#[tauri::command]
+pub fn resize_launcher<R: Runtime>(app: AppHandle<R>, height: f64, persist: bool) {
+    if let Some(win) = app.get_webview_window("launcher") {
+        let app2 = app.clone();
+        let w = win.clone();
+        let _ = win.run_on_main_thread(move || {
+            log_launcher_geometry(&app2, "resize:before", &w);
+            #[cfg(target_os = "macos")]
+            if let Ok(ptr) = w.ns_window() {
+                crate::macos::set_launcher_height_keep_top(ptr, height);
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = w.set_size(tauri::LogicalSize::new(LAUNCHER_WIDTH, height));
+            log_launcher_geometry(&app2, "resize:after", &w);
+        });
+    }
+    if persist {
+        if let Ok(store) = app.store(SETTINGS_FILE) {
+            store.set(LAUNCHER_HEIGHT_KEY, json!(height));
+            let _ = store.save();
+        }
+    }
+}
+
 /// The persisted launcher height (if sane), for pre-sizing at startup.
 pub fn stored_launcher_height<R: Runtime>(app: &AppHandle<R>) -> Option<f64> {
     app.store(SETTINGS_FILE)
@@ -383,19 +433,35 @@ pub fn show_launcher<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let app2 = app.clone();
     let w = win.clone();
     let _ = app.run_on_main_thread(move || {
+        log_launcher_geometry(&app2, "show:enter", &w);
+        // Pre-size to the stored (empty-query) height BEFORE showing. The launcher always
+        // reopens with a cleared query, but the last search may have shrunk the window
+        // while it was visible — and a hidden window can't run its rAF-driven resize, so it
+        // would otherwise open at the stale (small) size and visibly resize after show.
+        if let Some(h) = stored_launcher_height(&app2) {
+            let _ = w.set_size(tauri::LogicalSize::new(LAUNCHER_WIDTH, h));
+        }
         // Reposition to the active monitor and show — both on the main thread and in
         // this order, so the move is applied synchronously BEFORE the window becomes
         // visible. Previously set_position ran on the caller (shortcut) thread while
         // show ran on the main thread; in release the window would flash at its old
         // monitor/spot for a frame before the async move landed.
         place_launcher(&app2, &w);
+        log_launcher_geometry(&app2, "show:placed", &w);
         let _ = w.show();
+        // Re-assert the position after show(): on the very first open in a release build
+        // the NSWindow isn't realized yet, so the pre-show set_position doesn't stick and
+        // the window paints at the default corner. Setting it again here — synchronously
+        // in the same runloop turn, before the frame commits — corrects that first
+        // realization; warm opens re-apply the same spot and show no movement.
+        place_launcher(&app2, &w);
         // Menu-bar (accessory) apps don't activate when a window is shown, so the
         // WKWebView can't take key focus and the search input stays unfocused for up
         // to a second. Activate the app (like Spotlight) so typing works instantly.
         #[cfg(target_os = "macos")]
         crate::macos::activate_app();
         let _ = w.set_focus();
+        log_launcher_geometry(&app2, "show:shown", &w);
         let _ = app2.emit("launcher:opened", ());
     });
     // Warm the settings window in the background so ⌘; from here opens instantly.
@@ -555,18 +621,22 @@ pub fn build_settings_window<R: Runtime>(
     .visible(false)
     .on_page_load(|window, payload| {
         if payload.event() == tauri::webview::PageLoadEvent::Finished {
-            let app = window.app_handle();
-            let state = app.state::<AppState>();
-            state
-                .settings_loaded
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            // If an open was requested before we finished loading, honour it now.
-            if state
-                .settings_wants_show
-                .swap(false, std::sync::atomic::Ordering::SeqCst)
-            {
-                front_settings(&window);
-            }
+            // The DOM has loaded, but Solid hasn't necessarily mounted/painted yet —
+            // revealing now would flash an empty pane. Wait for the frontend's explicit
+            // ready ping (`notify_settings_ready`, fired after first paint) instead.
+            // Fallback: if that ping never arrives (JS error, etc.), reveal anyway after a
+            // short grace period so the window can't get stuck hidden.
+            let app = window.app_handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1200));
+                if !app
+                    .state::<AppState>()
+                    .settings_loaded
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                {
+                    mark_settings_ready(&app);
+                }
+            });
         }
     })
     .build()
@@ -650,6 +720,30 @@ fn front_settings<R: Runtime>(win: &tauri::WebviewWindow<R>) {
     });
 }
 
+/// Mark the settings window as loaded+painted and reveal it if an open is pending. Called
+/// by the frontend's ready ping (after first paint) or by the page-load fallback timer.
+fn mark_settings_ready<R: Runtime>(app: &AppHandle<R>) {
+    let state = app.state::<AppState>();
+    state
+        .settings_loaded
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    if state
+        .settings_wants_show
+        .swap(false, std::sync::atomic::Ordering::SeqCst)
+    {
+        if let Some(win) = app.get_webview_window("settings") {
+            front_settings(&win);
+        }
+    }
+}
+
+/// Frontend signal that the settings page has mounted and painted its first frame, so it's
+/// safe to reveal without flashing an empty pane. Idempotent.
+#[tauri::command]
+pub fn notify_settings_ready<R: Runtime>(app: AppHandle<R>) {
+    mark_settings_ready(&app);
+}
+
 // ---------- settings store ----------
 
 fn defaults() -> Value {
@@ -662,6 +756,8 @@ fn defaults() -> Value {
         "font_scale": "normal",
         "result_limit": 10,
         "frecency": {},
+        // Hidden: toggled from the Developer tab (⌘⇧D). Off by default.
+        "dev_logging": false,
     })
 }
 
@@ -928,13 +1024,25 @@ pub fn set_favorites<R: Runtime>(
 
 /// Entitlement + product info for the favorites unlock, for the paywall UI.
 #[tauri::command]
-pub fn favorites_status<R: Runtime>(app: AppHandle<R>, state: State<'_, AppState>) -> Value {
-    json!({
-        "unlocked": favorites_unlocked(&app, &state),
-        "purchased": favorites_purchased(&app),
-        "purchasable": crate::iap::purchasable(),
-        "price": crate::iap::price(),
-    })
+pub async fn favorites_status<R: Runtime>(app: AppHandle<R>) -> Result<Value, String> {
+    // Read the local (instant) flags first and drop the State guard before awaiting, so
+    // nothing non-Send is held across the await point.
+    let (unlocked, purchased) = {
+        let state = app.state::<AppState>();
+        (favorites_unlocked(&app, &state), favorites_purchased(&app))
+    };
+    // The StoreKit price fetch blocks (semaphore) — run it off the main thread so it can't
+    // freeze the UI or deadlock against StoreKit's own main-actor work. Cached in Swift, so
+    // repeat calls are cheap. `purchasable` is simply "a price is available".
+    let price = tauri::async_runtime::spawn_blocking(crate::iap::price)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(json!({
+        "unlocked": unlocked,
+        "purchased": purchased,
+        "purchasable": price.is_some(),
+        "price": price,
+    }))
 }
 
 /// Free "unlock for this session" — lasts until the app quits.
@@ -948,8 +1056,14 @@ pub fn unlock_favorites_session<R: Runtime>(app: AppHandle<R>, state: State<'_, 
 
 /// Buy the non-consumable unlock (StoreKit). Persists the mirror flag on success.
 #[tauri::command]
-pub fn purchase_favorites<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
-    crate::iap::purchase().map_err(|e| crate::i18n::t(&app, e.key()))?;
+pub async fn purchase_favorites<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    // Run the StoreKit purchase off the main thread. The Swift side blocks on a semaphore
+    // while StoreKit presents its sheet on the main actor — doing that on the main thread
+    // deadlocks (the "loading forever" bug), so it must run on a blocking worker.
+    tauri::async_runtime::spawn_blocking(crate::iap::purchase)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| crate::i18n::t(&app, e.key()))?;
     mark_favorites_purchased(&app);
     let _ = app.emit("favorites:unlocked", ());
     Ok(())
@@ -957,8 +1071,11 @@ pub fn purchase_favorites<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
 
 /// Restore a previous purchase (StoreKit). Returns true if something was restored.
 #[tauri::command]
-pub fn restore_favorites<R: Runtime>(app: AppHandle<R>) -> Result<bool, String> {
-    let restored = crate::iap::restore().map_err(|e| crate::i18n::t(&app, e.key()))?;
+pub async fn restore_favorites<R: Runtime>(app: AppHandle<R>) -> Result<bool, String> {
+    let restored = tauri::async_runtime::spawn_blocking(crate::iap::restore)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| crate::i18n::t(&app, e.key()))?;
     if restored {
         mark_favorites_purchased(&app);
         let _ = app.emit("favorites:unlocked", ());
@@ -1285,6 +1402,101 @@ pub fn remove_granted_folder<R: Runtime>(app: AppHandle<R>, path: String) -> Res
         state.granted.write().unwrap().retain(|p| p != &path);
     }
     crate::reindex(&app);
+    Ok(())
+}
+
+// ---------- developer tools: diagnostic log ----------
+//
+// An opt-in on-disk log for diagnosing field issues (e.g. whether the launcher webview is
+// being reloaded after idle). Gated behind the `dev_logging` setting and surfaced in a
+// hidden "Developer" tab in Settings (⌘⇧D). Writes are best-effort and no-op when disabled.
+
+const DEV_LOG_FILE: &str = "dev.log";
+const DEV_LOGGING_KEY: &str = "dev_logging";
+/// Cap the log so it can't grow unbounded; when exceeded we keep the most recent half.
+const DEV_LOG_MAX_BYTES: usize = 256 * 1024;
+
+fn dev_logging_enabled<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.store(SETTINGS_FILE)
+        .ok()
+        .and_then(|s| s.get(DEV_LOGGING_KEY))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+fn dev_log_path<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf> {
+    app.path().app_log_dir().ok().map(|d| d.join(DEV_LOG_FILE))
+}
+
+/// Append a timestamped line to the dev log — only when dev logging is enabled. Callable
+/// from anywhere in the backend (e.g. the webview-terminated delegate).
+pub fn dev_log_line<R: Runtime>(app: &AppHandle<R>, msg: &str) {
+    if !dev_logging_enabled(app) {
+        return;
+    }
+    let Some(path) = dev_log_path(app) else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    // Trim to the most recent half if we've exceeded the cap.
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if meta.len() as usize > DEV_LOG_MAX_BYTES {
+            if let Ok(data) = std::fs::read(&path) {
+                let cut = data.len().saturating_sub(DEV_LOG_MAX_BYTES / 2);
+                let _ = std::fs::write(&path, &data[cut..]);
+            }
+        }
+    }
+    let line = format!("{}\t{}\n", crate::now_ms(), msg);
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
+/// Frontend hook to append a diagnostic line (no-op unless dev logging is enabled).
+#[tauri::command]
+pub fn dev_log<R: Runtime>(app: AppHandle<R>, message: String) {
+    dev_log_line(&app, &message);
+}
+
+/// Read back the full dev log (empty string if none / unreadable).
+#[tauri::command]
+pub fn get_dev_logs<R: Runtime>(app: AppHandle<R>) -> String {
+    dev_log_path(&app)
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_default()
+}
+
+/// Delete the dev log.
+#[tauri::command]
+pub fn clear_dev_logs<R: Runtime>(app: AppHandle<R>) {
+    if let Some(p) = dev_log_path(&app) {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+/// Reveal the dev log file in Finder. Creates an empty file first if it doesn't exist yet
+/// (e.g. logging was never enabled), so there's always something to select.
+#[tauri::command]
+pub fn reveal_dev_logs<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    let path = dev_log_path(&app).ok_or("no log directory")?;
+    if !path.exists() {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        std::fs::write(&path, b"").map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    if !crate::macos::reveal_in_finder(&path.to_string_lossy()) {
+        return Err("failed to reveal log in Finder".into());
+    }
     Ok(())
 }
 

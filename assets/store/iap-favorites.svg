@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- IAP store image: brand-indigo background (matches app icon #bg) with a rounded
+       white star (mascot gradient #ffffff -> #ECE7FF). Full-bleed, no transparency. -->
+  <defs>
+    <!-- app-icon background gradient -->
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6D5EF7"/>
+      <stop offset="1" stop-color="#4A2FD0"/>
+    </linearGradient>
+    <!-- app-icon top sheen -->
+    <radialGradient id="sheen" cx="0.5" cy="0.08" r="0.95">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="0.6" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <!-- mascot white gradient -->
+    <linearGradient id="starfill" x1="0.30" y1="0" x2="0.70" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#ECE7FF"/>
+    </linearGradient>
+    <!-- soft luminous halo behind the star -->
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#sheen)"/>
+
+  <!-- glow so the star reads as luminous, like the mascot -->
+  <circle cx="512" cy="512" r="430" fill="url(#halo)"/>
+
+  <!-- rounded 5-point star: fill + matching thick round-join stroke rounds every corner -->
+  <polygon points="512.00,212.00 586.06,410.06 797.32,419.29 631.83,550.94 688.34,754.71 512.00,638.00 335.66,754.71 392.17,550.94 226.68,419.29 437.94,410.06"
+           fill="url(#starfill)" stroke="url(#starfill)"
+           stroke-width="64" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

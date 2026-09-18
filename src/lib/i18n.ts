@@ -142,6 +142,22 @@ const en = {
   // ---- shortcut capture ----
   "shortcut.pressKeys": "Press keys...",
 
+  // ---- developer tab (hidden; ⌘⇧D) ----
+  "tab.developer": "Developer",
+  "fav.purchasing": "Processing...",
+  "dev.title": "Diagnostic log",
+  "dev.desc":
+    "Records low-level events (such as launcher window reloads) to a local file to help diagnose issues. Off by default.",
+  "dev.enable": "Enable logging",
+  "dev.hint":
+    "Turn on logging, reproduce the issue, then Refresh to see entries. Press ⌘⇧D to hide this tab.",
+  "dev.refresh": "Refresh",
+  "dev.clear": "Clear",
+  "dev.copy": "Copy",
+  "dev.copied": "Copied",
+  "dev.reveal": "Reveal in Finder",
+  "dev.empty": "No log entries yet.",
+
   // ---- shared ----
   "common.to": "to",
   "common.or": "or",
@@ -280,6 +296,22 @@ const ptBR: Record<MsgKey, string> = {
 
   // ---- shortcut capture ----
   "shortcut.pressKeys": "Pressione as teclas...",
+
+  // ---- developer tab (hidden; ⌘⇧D) ----
+  "tab.developer": "Desenvolvedor",
+  "fav.purchasing": "Processando...",
+  "dev.title": "Registro de diagnóstico",
+  "dev.desc":
+    "Registra eventos de baixo nível (como recarregamentos da janela do launcher) em um arquivo local para ajudar a diagnosticar problemas. Desativado por padrão.",
+  "dev.enable": "Ativar registro",
+  "dev.hint":
+    "Ative o registro, reproduza o problema e toque em Atualizar para ver as entradas. Pressione ⌘⇧D para ocultar esta aba.",
+  "dev.refresh": "Atualizar",
+  "dev.clear": "Limpar",
+  "dev.copy": "Copiar",
+  "dev.copied": "Copiado",
+  "dev.reveal": "Mostrar no Finder",
+  "dev.empty": "Nenhuma entrada de registro ainda.",
 
   // ---- shared ----
   "common.to": "a",

@@ -326,6 +326,28 @@ pub fn run() {
             // opening it never has to reposition (no monitor-switch flash at show time).
             commands::watch_active_monitor(handle.clone());
 
+            // Keep the app (and its hidden launcher webview) out of App Nap, so macOS is far
+            // less likely to suspend/kill the WebContent process while it idles in the menu
+            // bar — avoiding the "reopen shows empty then reloads" flash. See #5.
+            #[cfg(target_os = "macos")]
+            macos::prevent_app_nap();
+
+            // Mark a new session in the dev log (no-op unless dev logging is on). Every
+            // subsequent "launcher webview mounted" line belongs to this session, so the
+            // count/timing of mounts since this line reveals webview reloads (see #5).
+            let version = handle.package_info().version.to_string();
+            #[cfg(target_os = "macos")]
+            let build = macos::bundle_build_number().unwrap_or_else(|| "dev".into());
+            #[cfg(not(target_os = "macos"))]
+            let build = "n/a".to_string();
+            commands::dev_log_line(
+                &handle,
+                &format!(
+                    "==== app started v{version} (build {build}, pid {}) ====",
+                    std::process::id()
+                ),
+            );
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -333,6 +355,7 @@ pub fn run() {
             commands::app_icon,
             commands::launch_app,
             commands::set_launcher_height,
+            commands::resize_launcher,
             commands::recenter_launcher,
             commands::hide_launcher,
             commands::open_settings,
@@ -363,6 +386,11 @@ pub fn run() {
             commands::unlock_favorites_session,
             commands::purchase_favorites,
             commands::restore_favorites,
+            commands::notify_settings_ready,
+            commands::dev_log,
+            commands::get_dev_logs,
+            commands::clear_dev_logs,
+            commands::reveal_dev_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

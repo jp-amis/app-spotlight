@@ -11,6 +11,7 @@ export interface Settings {
   font_scale: "smaller" | "normal" | "bigger" | "extra_big";
   result_limit: number;
   frecency: Frecency;
+  dev_logging: boolean; // hidden; toggled from the Developer tab (⌘⇧D)
 }
 
 export interface LanguageInfo {
@@ -90,6 +91,10 @@ export const hideLauncher = () => invoke<void>("hide_launcher");
 export const recenterLauncher = () => invoke<void>("recenter_launcher");
 export const setLauncherHeight = (height: number) =>
   invoke<void>("set_launcher_height", { height }).catch(() => {});
+// Resize the launcher to fit content, pinning the top-left (grows downward). `persist`
+// stores the height (only for the empty-query state) so the next open pre-sizes to it.
+export const resizeLauncher = (height: number, persist: boolean) =>
+  invoke<void>("resize_launcher", { height, persist }).catch(() => {});
 export const openSettings = () => invoke<void>("open_settings");
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSetting = (key: keyof Settings, value: unknown) =>
@@ -98,3 +103,15 @@ export const setShortcut = (accelerator: string) =>
   invoke<void>("set_shortcut", { accelerator });
 export const suspendShortcut = () => invoke<void>("suspend_shortcut");
 export const resumeShortcut = () => invoke<void>("resume_shortcut");
+
+// Settings window signals it has mounted + painted, so the backend can reveal it without
+// flashing an empty pane (see build_settings_window). Best-effort; swallow if unavailable.
+export const notifySettingsReady = () =>
+  invoke<void>("notify_settings_ready").catch(() => {});
+
+// Developer tools: opt-in diagnostic log (gated by the `dev_logging` setting).
+export const devLog = (message: string) =>
+  invoke<void>("dev_log", { message }).catch(() => {});
+export const getDevLogs = () => invoke<string>("get_dev_logs");
+export const clearDevLogs = () => invoke<void>("clear_dev_logs");
+export const revealDevLogs = () => invoke<void>("reveal_dev_logs");

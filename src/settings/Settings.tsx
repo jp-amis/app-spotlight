@@ -2,11 +2,15 @@ import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  clearDevLogs,
   favoritesStatus,
+  getDevLogs,
+  revealDevLogs,
   getFavorites,
   getLoginItem,
   getSettings,
   grantFolder,
+  notifySettingsReady,
   indexedApps,
   indexStatus,
   openKeyboardSettings,
@@ -36,21 +40,26 @@ import ShortcutCapture from "./ShortcutCapture";
 import { initI18n, t } from "../lib/i18n";
 import { initFontScale } from "../lib/fontscale";
 
-type Tab = "general" | "favorites" | "index" | "help";
+type Tab = "general" | "favorites" | "index" | "help" | "developer";
 
-const TAB_ORDER: Tab[] = ["general", "favorites", "index", "help"];
+const BASE_TABS: Tab[] = ["general", "favorites", "index", "help"];
 
 export default function Settings() {
   const [tab, setTab] = createSignal<Tab>("general");
   const tabRefs: Partial<Record<Tab, HTMLButtonElement>> = {};
+  // The Developer tab is hidden until ⌘⇧D reveals it (stays for the session).
+  const [devVisible, setDevVisible] = createSignal(false);
+  const tabOrder = (): Tab[] =>
+    devVisible() ? [...BASE_TABS, "developer"] : BASE_TABS;
 
   // Arrow keys move between tabs (ARIA tablist), keeping focus on the tab.
   function onTabsKeyDown(e: KeyboardEvent) {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     e.preventDefault();
-    const i = TAB_ORDER.indexOf(tab());
-    const delta = e.key === "ArrowRight" ? 1 : TAB_ORDER.length - 1;
-    const next = TAB_ORDER[(i + delta) % TAB_ORDER.length];
+    const order = tabOrder();
+    const i = order.indexOf(tab());
+    const delta = e.key === "ArrowRight" ? 1 : order.length - 1;
+    const next = order[(i + delta) % order.length];
     setTab(next);
     tabRefs[next]?.focus();
   }
@@ -62,6 +71,10 @@ export default function Settings() {
   const [favorites, setFavorites] = createSignal<string[]>([]);
   const [favFilter, setFavFilter] = createSignal("");
   const [favStatus, setFavStatus] = createSignal<FavoritesStatus>();
+  // True while a StoreKit purchase/restore is in flight (drives the button spinner).
+  const [purchasing, setPurchasing] = createSignal(false);
+  // Developer tab: the diagnostic log text and its loading state.
+  const [devLogs, setDevLogs] = createSignal("");
   const [loginItem, setLoginItem] = createSignal(false);
   const [error, setError] = createSignal("");
   // Set if a language change couldn't be applied live to a native surface.
@@ -87,23 +100,61 @@ export default function Settings() {
   }
   // Buy: unlock forever (StoreKit; unavailable outside the App Store build).
   async function buyUnlock() {
+    if (purchasing()) return; // guard against double-invoke while the sheet is up
     setError("");
+    setPurchasing(true);
     try {
       await purchaseFavorites();
       await refreshFavStatus();
     } catch (e) {
       if (String(e) !== "cancelled") setError(String(e));
+    } finally {
+      setPurchasing(false);
     }
   }
   async function restoreUnlock() {
+    if (purchasing()) return;
     setError("");
+    setPurchasing(true);
     try {
       const ok = await restoreFavorites();
       await refreshFavStatus();
       if (!ok) setError(t("fav.noPreviousPurchase"));
     } catch (e) {
       setError(String(e));
+    } finally {
+      setPurchasing(false);
     }
+  }
+
+  // Developer tab helpers.
+  async function loadDevLogs() {
+    try {
+      setDevLogs(await getDevLogs());
+    } catch {
+      /* no backend */
+    }
+  }
+  async function clearLogs() {
+    try {
+      await clearDevLogs();
+      setDevLogs("");
+    } catch {
+      /* ignore */
+    }
+  }
+  const [copied, setCopied] = createSignal(false);
+  async function copyLogs() {
+    try {
+      await navigator.clipboard.writeText(formatDevLogs(devLogs()));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
+  async function toggleDevLogging(v: boolean) {
+    await update("dev_logging", v);
   }
 
   // Toggle "open at login" (macOS SMAppService); optimistic, reverts on failure.
@@ -320,11 +371,17 @@ export default function Settings() {
       setData(await getSettings());
       setFavorites(await getFavorites());
       setLoginItem(await getLoginItem());
+      // The shell + General tab are populated and about to paint — tell the backend it's
+      // safe to reveal the window now (no empty-pane flash). Do the slower StoreKit /
+      // index queries afterwards so they can't delay the reveal.
+      requestAnimationFrame(() => void notifySettingsReady());
       await refreshFavStatus();
       await refreshStatus();
       await refreshApps();
     } catch (e) {
       setError(String(e));
+      // Even on error, reveal so the window can't get stuck hidden.
+      void notifySettingsReady();
     }
     // Live index status while the window is open.
     const uns = await Promise.all([
@@ -357,6 +414,18 @@ export default function Settings() {
       if (e.metaKey && !e.shiftKey && e.code === "KeyQ") {
         e.preventDefault();
         void getCurrentWindow().close();
+      }
+      // ⌘⇧D reveals (or hides) the hidden Developer tab.
+      if (e.metaKey && e.shiftKey && e.code === "KeyD") {
+        e.preventDefault();
+        const show = !devVisible();
+        setDevVisible(show);
+        if (show) {
+          setTab("developer");
+          void loadDevLogs();
+        } else if (tab() === "developer") {
+          setTab("general");
+        }
       }
     };
     document.addEventListener("keydown", onKey);
@@ -428,6 +497,15 @@ export default function Settings() {
           >
             {t("tab.shortcuts")}
           </TabButton>
+          <Show when={devVisible()}>
+            <TabButton
+              active={tab() === "developer"}
+              onClick={() => setTab("developer")}
+              ref={(el) => (tabRefs.developer = el)}
+            >
+              {t("tab.developer")}
+            </TabButton>
+          </Show>
         </div>
       </div>
 
@@ -611,16 +689,22 @@ export default function Settings() {
                       <div class="flex flex-col items-center gap-3">
                         <button
                           onClick={() => void buyUnlock()}
-                          disabled={!favStatus()?.purchasable}
-                          class="w-full max-w-xs rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-40"
+                          disabled={!favStatus()?.purchasable || purchasing()}
+                          class="flex w-full max-w-xs items-center justify-center gap-2 rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-40"
                         >
-                          {favStatus()?.purchasable
-                            ? t("fav.unlockForeverPriced", { price: favStatus()?.price ?? "" })
-                            : t("fav.unlockForever")}
+                          <Show when={purchasing()}>
+                            <Spinner />
+                          </Show>
+                          {purchasing()
+                            ? t("fav.purchasing")
+                            : favStatus()?.purchasable
+                              ? t("fav.unlockForeverPriced", { price: favStatus()?.price ?? "" })
+                              : t("fav.unlockForever")}
                         </button>
                         <button
                           onClick={() => void restoreUnlock()}
-                          class="text-xs text-neutral-500 hover:underline"
+                          disabled={purchasing()}
+                          class="text-xs text-neutral-500 hover:underline disabled:opacity-40"
                         >
                           {t("fav.restore")}
                         </button>
@@ -1001,6 +1085,67 @@ export default function Settings() {
                   </Section>
                 </div>
               </Show>
+
+              {/* ---------- Developer tab (hidden; ⌘⇧D) ---------- */}
+              <Show when={tab() === "developer"}>
+                <div class="space-y-6">
+                  <Section
+                    title={t("dev.title")}
+                    footnote={
+                      <>
+                        <span class="block">{t("dev.desc")}</span>
+                        <span class="mt-1 block">{t("dev.hint")}</span>
+                      </>
+                    }
+                  >
+                    <Toggle
+                      label={t("dev.enable")}
+                      checked={d().dev_logging}
+                      onChange={(v) => void toggleDevLogging(v)}
+                    />
+                  </Section>
+
+                  <div class="space-y-2">
+                    <div class="flex flex-wrap items-center justify-end gap-2">
+                      <button
+                        onClick={() => void copyLogs()}
+                        disabled={devLogs().trim().length === 0}
+                        class="rounded-lg border border-black/10 px-2.5 py-1 text-xs font-medium hover:bg-black/5 disabled:opacity-40 dark:border-white/10 dark:hover:bg-white/10"
+                      >
+                        {copied() ? t("dev.copied") : t("dev.copy")}
+                      </button>
+                      <button
+                        onClick={() => void revealDevLogs()}
+                        class="rounded-lg border border-black/10 px-2.5 py-1 text-xs font-medium hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
+                      >
+                        {t("dev.reveal")}
+                      </button>
+                      <button
+                        onClick={() => void loadDevLogs()}
+                        class="rounded-lg border border-black/10 px-2.5 py-1 text-xs font-medium hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
+                      >
+                        {t("dev.refresh")}
+                      </button>
+                      <button
+                        onClick={() => void clearLogs()}
+                        class="rounded-lg border border-black/10 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-500/10 dark:border-white/10"
+                      >
+                        {t("dev.clear")}
+                      </button>
+                    </div>
+                    <Show
+                      when={devLogs().trim().length > 0}
+                      fallback={
+                        <p class="text-xs text-neutral-400">{t("dev.empty")}</p>
+                      }
+                    >
+                      <pre class="max-h-80 w-full overflow-auto whitespace-pre-wrap break-all rounded-lg border border-black/10 bg-black/5 p-3 text-[11px] leading-relaxed text-neutral-700 dark:border-white/10 dark:bg-white/5 dark:text-neutral-300">
+                        {formatDevLogs(devLogs())}
+                      </pre>
+                    </Show>
+                  </div>
+                </div>
+              </Show>
               </>
             )}
           </Show>
@@ -1205,6 +1350,23 @@ function Spinner() {
   return (
     <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent opacity-70" />
   );
+}
+
+// Turn raw "<epoch-ms>\t<message>" log lines into "<local date-time>  <message>".
+function formatDevLogs(raw: string): string {
+  return raw
+    .split("\n")
+    .filter((l) => l.length > 0)
+    .map((line) => {
+      const i = line.indexOf("\t");
+      if (i < 0) return line;
+      const ms = Number(line.slice(0, i));
+      const stamp = Number.isFinite(ms)
+        ? new Date(ms).toLocaleString()
+        : line.slice(0, i);
+      return `${stamp}  ${line.slice(i + 1)}`;
+    })
+    .join("\n");
 }
 
 function lastUpdatedLabel(ms: number | null): string {

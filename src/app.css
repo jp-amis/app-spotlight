@@ -41,10 +41,16 @@ body.settings-window #root {
   border-radius: 8px;
 }
 
-/* Reduce motion when the OS asks for it. */
+/* Reduce motion when the OS asks for it. Cap the iteration count too, otherwise an
+   *infinite* animation (e.g. a loading spinner) just loops at ~0ms duration — spinning
+   absurdly fast instead of not moving. Iteration-count 1 makes it settle static. */
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }
